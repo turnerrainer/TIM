@@ -1,0 +1,23 @@
+# cargo-audit configuration.
+#
+# Advisory IDs listed under `ignore` are downgraded to soft warnings
+# so `cargo audit --deny warnings` still passes. Every entry MUST
+# carry a rationale and a review date; unreviewed entries are a
+# code smell. Any entry added here MUST also be mirrored in
+# deny.toml [advisories.ignore].
+
+[advisories]
+ignore = [
+    # `rsa` — Marvin Attack (timing side-channel on RSA decryption).
+    # TIM does NOT use `rsa` for signing or decryption. The crate is
+    # pulled in only to parse a PKCS#8 PEM private key at startup
+    # (`RsaPrivateKey::from_pkcs8_pem`), derive the public key
+    # (`RsaPublicKey::from(&private)`, `.n()`, `.e()`), and re-emit
+    # the public half as PKCS#1 PEM. All actual JWT sign / verify
+    # operations go through `jsonwebtoken`, which uses `ring`
+    # internally — the Marvin Attack surface is not reachable from
+    # any TIM code path. Re-audit if TIM ever gains a code path
+    # that calls `RsaPrivateKey::decrypt` or similar.
+    # Review: 2026-11-01
+    "RUSTSEC-2023-0071",
+]

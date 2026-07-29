@@ -1,0 +1,234 @@
+name: Publish container image
+
+# Trigger on release tag push OR manual dispatch.
+#
+# Tag-push (the normal path):
+#   v0.7.1         → stable release
+#   v0.7.1-rc.1    → pre-release (rc / beta / alpha / preview / any suffix)
+# The `derive version tags` step below reads which shape was pushed
+# and chooses whether to move :latest and :major.minor accordingly.
+#
+# workflow_dispatch (the escape hatch):
+#   Lets an operator re-run the publish workflow against an existing
+#   tag from the Actions UI without cutting a new tag. Useful when
+#   the workflow itself has a config bug.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.1.0-rc.1). Must already exist on the repo."
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # Derive the tag list. Two paths:
+      #   * Stable release (`v0.7.1`):
+      #       → push :0.7.1, :0.7, :latest
+      #   * Pre-release  (`v0.7.1-rc.1`, `v0.8.0-beta.2`, ...):
+      #       → push :0.7.1-rc.1 AND :<suffix-type> (e.g. :rc, :beta,
+      #         :alpha). Never move :latest or :0.7 from a pre-
+      #         release — those are the implicit-trust tags.
+      - name: Compose image tags
+        id: meta
+        env:
+          TAG_REF: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_REF#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+            SUFFIX="${VERSION#*-}"
+            SUFFIX_TYPE="${SUFFIX%%.*}"
+            TAG_LINES=$(cat <<END
+          ghcr.io/turnerrainer/tim:$VERSION
+          ghcr.io/turnerrainer/tim:$SUFFIX_TYPE
+          docker.io/turnerrainer/tim:$VERSION
+          docker.io/turnerrainer/tim:$SUFFIX_TYPE
+          END
+          )
+          else
+            PRERELEASE=false
+            MAJOR_MINOR="${VERSION%.*}"
+            TAG_LINES=$(cat <<END
+          ghcr.io/turnerrainer/tim:$VERSION
+          ghcr.io/turnerrainer/tim:$MAJOR_MINOR
+          ghcr.io/turnerrainer/tim:latest
+          docker.io/turnerrainer/tim:$VERSION
+          docker.io/turnerrainer/tim:$MAJOR_MINOR
+          docker.io/turnerrainer/tim:latest
+          END
+          )
+          fi
+          echo "version=$VERSION"        >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE"  >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<END_OF_TAGS"
+            echo "$TAG_LINES"
+            echo "END_OF_TAGS"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing tags:"
+          echo "$TAG_LINES"
+
+      # SOURCE_DATE_EPOCH pins layer timestamps to the tag commit's
+      # time. Buildx honours it with `rewrite-timestamp=true` below.
+      # Bit-for-bit Rust binary reproducibility is a separate rabbit
+      # hole and is NOT enforced here.
+      - name: Compute SOURCE_DATE_EPOCH from commit time
+        id: sde
+        run: echo "epoch=$(git log -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+
+      # QEMU emulates linux/arm64 on the amd64 runner. Slower than
+      # native but keeps the whole publish in one job. Swap to matrix
+      # + real arm64 runners if build time crosses ~25 min.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Repo secrets needed: DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
+      # (Read/Write/Delete scope). See DEV-REQUIREMENTS §9.1.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (multi-arch)
+        id: build
+        uses: docker/build-push-action@v6
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.sde.outputs.epoch }}
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,push=true,rewrite-timestamp=true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          # `ignore-error=true` — cache-export failures on re-runs
+          # / workflow_dispatch should not fail the publish.
+          cache-to: type=gha,mode=max,ignore-error=true
+
+      # Trivy checks OS layer + language deps. `--exit-code 1` on
+      # HIGH/CRITICAL findings blocks signing. `ignore-unfixed:
+      # true` because we can't patch upstream Debian CVEs.
+      - name: Trivy vulnerability scan (linux/amd64 layer)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/turnerrainer/tim@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          scanners: vuln
+
+      # Smoke test each per-arch image. Docker keys locally-cached
+      # images by digest, not (digest, platform), so we docker rmi
+      # between iterations and pull explicitly with --platform.
+      #
+      # TIM needs a Postgres sidecar to start cleanly (migrations
+      # run at boot). Spin one up per platform loop iteration.
+      - name: Smoke test — /health on both arches
+        env:
+          IMAGE: docker.io/turnerrainer/tim@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            echo "::group::smoke test on ${platform}"
+
+            # Postgres sidecar (native amd64; TIM under test is
+            # per-platform). Any platform for postgres is fine — it
+            # only needs to respond to TCP from another container.
+            pg_cid="$(docker run -d --rm \
+                       -e POSTGRES_DB=tim \
+                       -e POSTGRES_USER=tim \
+                       -e POSTGRES_PASSWORD=smoke \
+                       postgres:16-alpine)"
+            pg_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${pg_cid}")"
+
+            # Wait for pg_isready.
+            for i in $(seq 1 30); do
+              if docker exec "${pg_cid}" pg_isready -U tim -d tim >/dev/null 2>&1; then
+                break
+              fi
+              sleep 1
+            done
+
+            docker image rm -f "${IMAGE}" >/dev/null 2>&1 || true
+            docker pull --quiet --platform "${platform}" "${IMAGE}"
+            tim_cid="$(docker run -d --rm --platform "${platform}" \
+                       -e TIM_DATABASE_URL="postgres://tim:smoke@${pg_ip}:5432/tim" \
+                       -p 18085:8085 "${IMAGE}")"
+
+            ok=0
+            for i in $(seq 1 90); do
+              if curl -sf http://localhost:18085/health >/dev/null; then
+                echo "${platform}: /health OK after ${i}s"
+                ok=1
+                break
+              fi
+              sleep 1
+            done
+
+            if [ "${ok}" -ne 1 ]; then
+              echo "::error::${platform}: /health did not respond within 90s"
+              docker logs "${tim_cid}" || true
+              docker logs "${pg_cid}" || true
+              docker rm -f "${tim_cid}" "${pg_cid}" >/dev/null 2>&1 || true
+              exit 1
+            fi
+
+            docker rm -f "${tim_cid}" "${pg_cid}" >/dev/null
+            echo "::endgroup::"
+          done
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless signing via GHA OIDC. Signs both registries so
+      # `cosign verify` works wherever a partner pulls from.
+      - name: Sign published images (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for registry_image in \
+              ghcr.io/turnerrainer/tim \
+              docker.io/turnerrainer/tim
+          do
+            echo "Signing ${registry_image}@${DIGEST}"
+            cosign sign --yes "${registry_image}@${DIGEST}"
+          done

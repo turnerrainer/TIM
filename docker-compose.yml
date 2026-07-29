@@ -1,0 +1,68 @@
+# Production-hardened compose file for TIM-on-Rust.
+# See STANDARDS.md §7 for the security posture rationale.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tim-postgres
+    environment:
+      POSTGRES_DB: tim
+      POSTGRES_USER: tim
+      POSTGRES_PASSWORD: ${TIM_DATABASE_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - tim-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tim -d tim"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tim-on-rust:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tim-on-rust:0.1.0-rc.1
+    container_name: tim-on-rust
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    # The image ships tim.yaml + migrations baked in. The RSA
+    # private key is external — generate one and mount it. The
+    # demo `docker compose up` bind-mounts ./keys for convenience;
+    # in production your secrets manager writes the key to a
+    # volume that this compose overrides.
+    volumes:
+      - ./keys:/opt/tim/keys:ro
+    #   - ./tim.yaml:/app/tim.yaml:ro                  # your own config
+    #   - ./migrations:/app/migrations:ro              # custom migrations
+    environment:
+      - RUST_LOG=info,tim_on_rust=debug
+      - TIM_DATABASE_URL=postgres://tim:${TIM_DATABASE_PASSWORD:-changeme}@postgres:5432/tim
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  tim-pgdata:

@@ -1,0 +1,73 @@
+# TIM-on-Rust default configuration.
+#
+# Every field has a safe default; override only what you need.
+# Resolution order at startup:
+#   1. --config <path> CLI flag
+#   2. TIM_CONFIG=<path> env var
+#   3. ./tim.yaml or ./tim.yml in working directory
+#   4. Built-in defaults (this file's schema)
+
+server:
+  # Bind address. 0.0.0.0 inside container, 127.0.0.1 for local dev.
+  bind: "0.0.0.0"
+  port: 8085
+  # Max request body size (bytes). Guards against memory exhaustion.
+  max_request_bytes: 1048576
+  # Per-request timeout (seconds).
+  request_timeout_seconds: 30
+
+database:
+  # Full Postgres URL. Format: postgres://user:pass@host:port/dbname
+  # In production, source the password from a secret manager and inject
+  # via TIM_DATABASE_URL — never commit real credentials.
+  url_env: "TIM_DATABASE_URL"
+  # Startup refuses if this env var is unset.
+  min_connections: 2
+  max_connections: 10
+  # Automatically run migrations at startup.
+  auto_migrate: true
+
+jwt:
+  # RSA private key location (PKCS#8 PEM). Loaded once at startup.
+  # The public half is derived and exposed at /jwt/keys/public (JWKS).
+  private_key_path: "/opt/tim/keys/jwt-private.pem"
+  # kid (key ID) advertised in the JWS header and JWKS.
+  key_id: "tim-rs-1"
+  # Issuer claim (`iss`) placed on every custom JWT.
+  issuer: "TIM"
+  # Optional audience validation.
+  audience:
+    validation_enabled: false
+    # Comma-separated string or YAML list.
+    allowed: []
+    # Default audience if request omits one.
+    default: "tim-service"
+  # Max claims payload size (bytes) at generate time.
+  max_claims_bytes: 32768
+  # Bulk-revoke cap. Requests above this are rejected 400.
+  bulk_revoke_max: 100
+
+# OAuth2/OIDC providers. Fully config-driven. Add a provider by
+# appending a block; no code changes required for standard OIDC.
+oauth2:
+  # Where to persist authorization state and (future) sessions.
+  # MVP uses in-process DashMap; production should use Postgres.
+  session_store: "memory"
+  # OIDC discovery + JWKS cache TTL (seconds).
+  discovery_cache_ttl_seconds: 3600
+  providers: {}
+  # Example (uncomment and fill in real values, secrets via env):
+  # providers:
+  #   google:
+  #     name: "Google"
+  #     discovery_url: "https://accounts.google.com/.well-known/openid-configuration"
+  #     client_id_env: "TIM_GOOGLE_CLIENT_ID"
+  #     client_secret_env: "TIM_GOOGLE_CLIENT_SECRET"
+  #     scopes: ["openid", "profile", "email"]
+  #     claim_mappings:
+  #       first_name: "given_name"
+  #       last_name: "family_name"
+  #       email: "email"
+  #     token_validation:
+  #       clock_skew_seconds: 60
+  #       cache_ttl_seconds: 3600

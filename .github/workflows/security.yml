@@ -1,0 +1,50 @@
+name: security
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    # Daily refresh so a new advisory against unchanged Cargo.lock
+    # still fires even without a code change.
+    - cron: "0 6 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo-audit binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-bin-v1
+      - name: Install cargo-audit
+        run: |
+          if ! command -v cargo-audit >/dev/null; then
+            cargo install --locked cargo-audit
+          fi
+      - name: Run cargo audit
+        # `--deny warnings` promotes unmaintained warnings to hard
+        # fails alongside vulnerability errors. Exceptions live in
+        # `.cargo/audit.toml` with rationale + review date.
+        run: cargo audit --deny warnings
+
+  # cargo-deny covers what cargo-audit does not: license allow-list
+  # (refuse GPL/AGPL/SSPL), ban rules (no wildcards, warn on duplicate
+  # versions), source rules (crates.io only — no unvetted git deps).
+  # Config: deny.toml.
+  #
+  # Advisory exceptions must be mirrored between deny.toml and
+  # .cargo/audit.toml — they don't share the file. See STANDARDS.md §5.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check all

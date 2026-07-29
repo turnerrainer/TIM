@@ -1,0 +1,76 @@
+[package]
+name = "tim-on-rust"
+version = "0.1.0-rc.1"
+edition = "2021"
+rust-version = "1.88"
+authors = ["Rainer Türner"]
+license = "Apache-2.0"
+description = "TIM — Token Identity Manager. Rust implementation. Custom JWT lifecycle + OAuth2/OIDC multi-provider auth + RFC 7662 introspection."
+repository = "https://github.com/turnerrainer/TIM"
+
+[dependencies]
+# Web framework + async runtime
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["trace", "limit", "timeout"] }
+
+# Serialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+serde_urlencoded = "0.7"
+
+# HTTP client (native-tls for broad TLS compatibility with upstream OIDC providers)
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+
+# Database (PostgreSQL, async, no ORM)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "postgres", "uuid", "chrono", "macros", "migrate"] }
+
+# JWT + crypto
+jsonwebtoken = "9"
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+sha2 = "0.10"
+base64 = "0.22"
+
+# Concurrency primitives
+dashmap = "6"
+
+# Caching (OIDC discovery + JWKS)
+moka = { version = "0.12", features = ["future"] }
+
+# Common
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+url = "2"
+rand = "0.8"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# CLI arg parsing
+clap = { version = "4", features = ["derive", "env"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
+mockito = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "tim-on-rust"
+path = "src/main.rs"
+
+# Clippy posture — matches Ruuter-on-Rust + XTR + DEV-REQUIREMENTS §2.
+# `cargo clippy --all-targets -- -D warnings` is the CI gate.
+[lints.clippy]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

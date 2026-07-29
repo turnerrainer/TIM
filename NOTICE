@@ -1,0 +1,14 @@
+TIM-on-Rust
+Copyright 2026 Rainer Türner
+
+This product includes software developed by Rainer Türner
+(https://github.com/turnerrainer/TIM).
+
+Derivative works must retain this NOTICE per Section 4(d) of the
+Apache License, Version 2.0 (see LICENSE).
+
+TIM-on-Rust is a Rust re-implementation of the Token Identity Manager
+originally developed at the Information System Authority of Estonia
+(Riigi Infosüsteemi Amet, RIA) as the TARA Integration Module, and later
+extended as a universal, provider-agnostic identity manager in Java by
+Rainer Türner at https://github.com/buerokratt/TIM.

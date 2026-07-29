@@ -1,0 +1,52 @@
+name: docs
+
+on:
+  push:
+    branches: [main, dev]
+  # Manual trigger so RC docs can be previewed without merging to main.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mdBook
+        run: |
+          MDBOOK_VERSION=0.4.40
+          curl -sSL -o mdbook.tar.gz \
+            "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf mdbook.tar.gz -C /usr/local/bin/ mdbook
+          rm mdbook.tar.gz
+      - name: Install mdbook-linkcheck
+        run: |
+          MDLC_VERSION=0.7.7
+          curl -sSL -o mdbook-linkcheck.zip \
+            "https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/download/v${MDLC_VERSION}/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip"
+          unzip -o mdbook-linkcheck.zip -d /usr/local/bin/ mdbook-linkcheck
+          chmod +x /usr/local/bin/mdbook-linkcheck
+          rm mdbook-linkcheck.zip
+      # Root CHANGELOG.md is the source of truth. The book renders
+      # a synced copy under reference/; regenerate here so they
+      # never drift.
+      - name: Sync CHANGELOG into book
+        run: cp CHANGELOG.md book/src/reference/changelog.md
+      - name: Build book (linkcheck fails on broken internal links)
+        run: mdbook build book
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # linkcheck writes reports under book/book/linkcheck/;
+          # only html/ is the site.
+          path: book/book/html
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
