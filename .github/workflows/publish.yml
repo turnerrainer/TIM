@@ -159,20 +159,34 @@ jobs:
       # images by digest, not (digest, platform), so we docker rmi
       # between iterations and pull explicitly with --platform.
       #
-      # TIM needs a Postgres sidecar to start cleanly (migrations
-      # run at boot). Spin one up per platform loop iteration.
+      # TIM needs three things to start:
+      #   1. Postgres reachable at TIM_DATABASE_URL (migrations run
+      #      at boot).
+      #   2. RSA PKCS#8 private key at /opt/tim/keys/jwt-private.pem
+      #      (default path in the shipped tim.yaml). We generate a
+      #      throwaway key per run and bind-mount it.
+      #   3. The workload container flag `--rm` — do NOT set it here,
+      #      so `docker logs` works after a crash.
       - name: Smoke test — /health on both arches
         env:
           IMAGE: docker.io/turnerrainer/tim@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
+
+          # Throwaway JWT signing key, valid PKCS#8 PEM, world-readable
+          # so uid 1000 in the container can open it.
+          key_dir="$(mktemp -d)"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out "${key_dir}/jwt-private.pem"
+          chmod 644 "${key_dir}/jwt-private.pem"
+
           for platform in linux/amd64 linux/arm64; do
             echo "::group::smoke test on ${platform}"
 
             # Postgres sidecar (native amd64; TIM under test is
             # per-platform). Any platform for postgres is fine — it
             # only needs to respond to TCP from another container.
-            pg_cid="$(docker run -d --rm \
+            pg_cid="$(docker run -d \
                        -e POSTGRES_DB=tim \
                        -e POSTGRES_USER=tim \
                        -e POSTGRES_PASSWORD=smoke \
@@ -189,8 +203,9 @@ jobs:
 
             docker image rm -f "${IMAGE}" >/dev/null 2>&1 || true
             docker pull --quiet --platform "${platform}" "${IMAGE}"
-            tim_cid="$(docker run -d --rm --platform "${platform}" \
+            tim_cid="$(docker run -d --platform "${platform}" \
                        -e TIM_DATABASE_URL="postgres://tim:smoke@${pg_ip}:5432/tim" \
+                       -v "${key_dir}:/opt/tim/keys:ro" \
                        -p 18085:8085 "${IMAGE}")"
 
             ok=0
@@ -205,7 +220,9 @@ jobs:
 
             if [ "${ok}" -ne 1 ]; then
               echo "::error::${platform}: /health did not respond within 90s"
+              echo "--- tim logs ---"
               docker logs "${tim_cid}" || true
+              echo "--- postgres logs ---"
               docker logs "${pg_cid}" || true
               docker rm -f "${tim_cid}" "${pg_cid}" >/dev/null 2>&1 || true
               exit 1
@@ -214,6 +231,8 @@ jobs:
             docker rm -f "${tim_cid}" "${pg_cid}" >/dev/null
             echo "::endgroup::"
           done
+
+          rm -rf "${key_dir}"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
