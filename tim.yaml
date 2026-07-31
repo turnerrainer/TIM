@@ -1,4 +1,4 @@
-# TIM-on-Rust default configuration.
+# TIM default configuration.
 #
 # Every field has a safe default; override only what you need.
 # Resolution order at startup:

@@ -65,7 +65,7 @@ Container runtime posture (see `docker-compose.yml`):
 
 ## Out of scope
 
-TIM-on-Rust is a token / identity issuer. It does **not** provide:
+TIM is a token / identity issuer. It does **not** provide:
 
 - Secret storage — mount your private key and database URL from
   your secret manager.

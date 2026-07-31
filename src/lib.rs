@@ -1,4 +1,4 @@
-//! TIM-on-Rust — Token Identity Manager.
+//! TIM — Token Identity Manager.
 //!
 //! Public surface intentionally minimal; integration tests import
 //! `crate::router::build_router` and `crate::config::AppConfig`.

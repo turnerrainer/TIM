@@ -1,12 +1,12 @@
 [package]
-name = "tim-on-rust"
-version = "0.1.0-rc.1"
+name = "tim"
+version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Rainer Türner"]
 license = "Apache-2.0"
 description = "TIM — Token Identity Manager. Rust implementation. Custom JWT lifecycle + OAuth2/OIDC multi-provider auth + RFC 7662 introspection."
-repository = "https://github.com/turnerrainer/TIM"
+repository = "https://github.com/turnerrainer/tim"
 
 [dependencies]
 # Web framework + async runtime
@@ -63,7 +63,7 @@ mockito = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[bin]]
-name = "tim-on-rust"
+name = "tim"
 path = "src/main.rs"
 
 # Clippy posture — matches Ruuter-on-Rust + XTR + DEV-REQUIREMENTS §2.

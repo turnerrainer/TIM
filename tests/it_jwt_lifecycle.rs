@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use tim_on_rust::{
+use tim::{
     config::{AppConfig, JwtConfig},
     crypto::JwtSigner,
     db,
@@ -27,7 +27,7 @@ async fn setup() -> Option<(AppState, axum::Router)> {
         .with_test_writer()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("tim_on_rust=debug")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("tim=debug")),
         )
         .try_init();
     let Ok(db_url) = std::env::var("TIM_DATABASE_URL") else {

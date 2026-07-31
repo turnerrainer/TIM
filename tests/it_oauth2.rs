@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use serde_json::Value;
-use tim_on_rust::{
+use tim::{
     config::{AppConfig, JwtConfig},
     crypto::JwtSigner,
     db,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tim_on_rust::{
+use tim::{
     config::AppConfig,
     crypto::JwtSigner,
     db,
@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "tim-on-rust", version, about = "Token Identity Manager")]
+#[command(name = "tim", version, about = "Token Identity Manager")]
 struct Cli {
     /// Path to config file (YAML). Overrides TIM_CONFIG env var.
     #[arg(short, long, env = "TIM_CONFIG")]
@@ -78,14 +78,14 @@ async fn main() -> Result<()> {
 
     let addr: SocketAddr = format!("{}:{}", config.server.bind, config.server.port).parse()?;
     let router = build_router(state, &config);
-    info!(%addr, "TIM-on-Rust listening");
+    info!(%addr, "TIM listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
     Ok(())
 }
 
-fn oauth2_session_store(config: &AppConfig) -> tim_on_rust::oauth2::session::MemoryStore {
+fn oauth2_session_store(config: &AppConfig) -> tim::oauth2::session::MemoryStore {
     let ttl = std::time::Duration::from_secs(config.oauth2.session_ttl_seconds);
-    tim_on_rust::oauth2::session::MemoryStore::new(ttl)
+    tim::oauth2::session::MemoryStore::new(ttl)
 }

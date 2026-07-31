@@ -91,14 +91,14 @@ At startup, TIM:
 
 ## Session storage — MVP limitation
 
-The 0.1.0-rc.1 session store is **in-process** (a `DashMap`). This
+The 0.1.0-alpha.1 session store is **in-process** (a `DashMap`). This
 means:
 
 - Sessions do NOT survive process restart.
 - Sessions do NOT span replicas.
 
 **Consequence**: run TIM as a single replica behind a session-affinity
-load balancer until [task 002](https://github.com/turnerrainer/TIM/blob/dev/tasks/backlog/002-oauth2-session-store.md)
+load balancer until [task 002](https://github.com/turnerrainer/tim/blob/dev/tasks/backlog/002-oauth2-session-store.md)
 lands (Postgres-backed session store with encrypted-at-rest token
 material).
 
@@ -107,8 +107,8 @@ is in effect so this constraint is visible in operator logs.
 
 ## PKCE
 
-The 0.1.0-rc.1 flow does NOT emit PKCE parameters. `auth.oauth_state`
-has a `pkce_verifier` column reserved for [task 003](https://github.com/turnerrainer/TIM/blob/dev/tasks/backlog/003-pkce-flow.md).
+The 0.1.0-alpha.1 flow does NOT emit PKCE parameters. `auth.oauth_state`
+has a `pkce_verifier` column reserved for [task 003](https://github.com/turnerrainer/tim/blob/dev/tasks/backlog/003-pkce-flow.md).
 The `state` parameter alone provides CSRF protection today; PKCE
 adds interception protection for public clients, which TIM does not
 currently target.

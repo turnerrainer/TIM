@@ -1,12 +1,12 @@
 # STANDARDS
 
-TIM-on-Rust follows every rule in
+TIM follows every rule in
 [`../DEV-REQUIREMENTS.md`](../DEV-REQUIREMENTS.md) — the authoritative
 Buerostack Rust ruleset, compiled from Ruuter-on-Rust and XTR
 experience. Read that file front-to-back before touching this repo.
 
 This file lists the small set of project-specific extras and
-codifies where TIM-on-Rust deviates (with justification) from the
+codifies where TIM deviates (with justification) from the
 generic ruleset.
 
 ## Project-specific extras
@@ -14,7 +14,7 @@ generic ruleset.
 ### 1. Database is Postgres — real, not mocked
 
 Per DEV-REQUIREMENTS §3, integration tests must not mock the
-database. TIM-on-Rust integration tests connect to a real Postgres
+database. TIM integration tests connect to a real Postgres
 instance. Locally this is `docker compose up postgres`; in CI it is
 a service container (see `.github/workflows/tests.yml`).
 
@@ -42,7 +42,7 @@ The OAuth2 module's session cache is an in-process `DashMap`. This
 is **explicitly not** production-grade for multi-instance deploys —
 sessions do not survive process restart and do not span pods. The
 Postgres-backed session store is tracked as a backlog task; until it
-lands, deploy TIM-on-Rust behind a session-affinity load balancer
+lands, deploy TIM behind a session-affinity load balancer
 or as a single replica.
 
 This constraint is documented in `book/src/oauth2.md` and in

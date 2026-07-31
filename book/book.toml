@@ -1,16 +1,16 @@
 [book]
-title = "TIM-on-Rust"
+title = "TIM"
 authors = ["Rainer Türner"]
-description = "Reference for operators and API consumers of TIM-on-Rust — Token Identity Manager."
+description = "Reference for operators and API consumers of TIM — Token Identity Manager."
 language = "en"
 src = "src"
 
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "light"
-git-repository-url = "https://github.com/turnerrainer/TIM"
-edit-url-template = "https://github.com/turnerrainer/TIM/edit/dev/book/{path}"
-site-url = "/TIM/"
+git-repository-url = "https://github.com/turnerrainer/tim"
+edit-url-template = "https://github.com/turnerrainer/tim/edit/dev/book/{path}"
+site-url = "/tim/"
 
 [output.html.search]
 enable = true

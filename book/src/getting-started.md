@@ -16,8 +16,8 @@ Nothing else. TIM's runtime is a self-contained container image.
 If you just want the published image, skip to step 3.
 
 ```bash
-git clone https://github.com/turnerrainer/TIM.git tim-on-rust
-cd tim-on-rust
+git clone https://github.com/turnerrainer/tim.git
+cd tim
 ```
 
 ## 3. Generate a demo RSA signing key
@@ -45,7 +45,7 @@ docker compose up -d
 Docker Compose starts:
 
 - **`tim-postgres`** — PostgreSQL 16, port 5432 on host.
-- **`tim-on-rust`** — TIM API server, port 8085 on host.
+- **`tim`** — TIM API server, port 8085 on host.
 
 TIM waits for Postgres to be healthy, runs SQL migrations on first
 boot, and starts serving.
@@ -120,8 +120,8 @@ Every published tag is signed keyless via cosign. From a machine
 with `cosign` installed:
 
 ```bash
-cosign verify docker.io/turnerrainer/tim:0.1.0-rc.1 \
-  --certificate-identity-regexp 'https://github.com/turnerrainer/TIM/' \
+cosign verify docker.io/turnerrainer/tim:0.1.0-alpha.1 \
+  --certificate-identity-regexp 'https://github.com/turnerrainer/tim/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 

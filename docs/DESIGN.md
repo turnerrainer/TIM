@@ -1,6 +1,6 @@
-# TIM-on-Rust — Domain Design
+# TIM — Domain Design
 
-Source of truth for what TIM-on-Rust must implement. Distilled from
+Source of truth for what TIM must implement. Distilled from
 the Java TIM 2.0 codebase (Spring Boot 3.3.3, Java 17, 4 Maven
 modules, ~50 source files). Every endpoint, DB table, config field,
 and lifecycle rule below has a direct equivalent in the JVM

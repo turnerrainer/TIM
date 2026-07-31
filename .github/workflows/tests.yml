@@ -54,7 +54,7 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: build
-        run: cargo build --release --bin tim-on-rust
+        run: cargo build --release --bin tim
       - name: cargo test
         run: cargo test --release --no-fail-fast
 

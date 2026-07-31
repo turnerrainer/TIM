@@ -1,4 +1,4 @@
-# Production-hardened compose file for TIM-on-Rust.
+# Production-hardened compose file for TIM.
 # See STANDARDS.md §7 for the security posture rationale.
 services:
   postgres:
@@ -19,12 +19,12 @@ services:
       timeout: 5s
       retries: 5
 
-  tim-on-rust:
+  tim:
     build:
       context: .
       dockerfile: Dockerfile
-    image: tim-on-rust:0.1.0-rc.1
-    container_name: tim-on-rust
+    image: tim:0.1.0-alpha.1
+    container_name: tim
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,7 +40,7 @@ services:
     #   - ./tim.yaml:/app/tim.yaml:ro                  # your own config
     #   - ./migrations:/app/migrations:ro              # custom migrations
     environment:
-      - RUST_LOG=info,tim_on_rust=debug
+      - RUST_LOG=info,tim=debug
       - TIM_DATABASE_URL=postgres://tim:${TIM_DATABASE_PASSWORD:-changeme}@postgres:5432/tim
     restart: unless-stopped
     read_only: true

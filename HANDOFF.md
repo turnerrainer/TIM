@@ -3,7 +3,7 @@
 **Written**: 2026-07-30
 **Last verified green**: 2026-07-30 — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build --release`, `cargo test --no-fail-fast` (25/0/0: 13 unit + 12 integration), `cargo audit --deny warnings` (1 documented exception in `.cargo/audit.toml`), `cargo deny check all`, `mdbook build book` (linkcheck error-strict), `docker build .`, `docker compose up -d` → `/health` responded in 2s, real JWT issued end-to-end. All exit 0.
 **Branch**: `dev` (initial state; nothing pushed to remote yet)
-**Release**: `v0.1.0-rc.1` (Cargo.toml + CHANGELOG + VERSION) — not yet tagged / published.
+**Release**: `v0.1.0-alpha.1` (Cargo.toml + CHANGELOG + VERSION) — not yet tagged / published.
 
 This file is the entry point for the next contributor (human or agent). Read this, run the verification set, then dive into the specific files it points at.
 
@@ -33,24 +33,24 @@ This file is the entry point for the next contributor (human or agent). Read thi
 
 ## Release state at handoff
 
-- **Cargo.toml `version = "0.1.0-rc.1"`**, CHANGELOG `[0.1.0-rc.1] - 2026-07-30`, `VERSION` = `0.1.0-rc.1`, `docker-compose.yml image: tim-on-rust:0.1.0-rc.1`. All aligned.
+- **Cargo.toml `version = "0.1.0-alpha.1"`**, CHANGELOG `[0.1.0-alpha.1] - 2026-07-30`, `VERSION` = `0.1.0-alpha.1`, `docker-compose.yml image: tim:0.1.0-alpha.1`. All aligned.
 - Not yet tagged. First publish is a manual step by the maintainer:
-  1. `gh repo create turnerrainer/TIM --public --source .`
-  2. Enable Pages: `gh api repos/turnerrainer/TIM/pages -X POST -f 'build_type=workflow'`
+  1. `gh repo create turnerrainer/tim --public --source .`
+  2. Enable Pages: `gh api repos/turnerrainer/tim/pages -X POST -f 'build_type=workflow'`
   3. Workflow permissions Read+Write:
-     `gh api repos/turnerrainer/TIM/actions/permissions/workflow -X PUT -F 'default_workflow_permissions=write' -F 'can_approve_pull_request_reviews=false'`
+     `gh api repos/turnerrainer/tim/actions/permissions/workflow -X PUT -F 'default_workflow_permissions=write' -F 'can_approve_pull_request_reviews=false'`
   4. Create Docker Hub repo at <https://hub.docker.com/repositories/turnerrainer> → New repository → `tim` → Public.
   5. Generate a repo-scoped Docker Hub PAT (Read + Write + Delete on `turnerrainer/tim` only).
   6. Set secrets:
      ```bash
-     gh secret set DOCKERHUB_USERNAME --repo turnerrainer/TIM --body 'turnerrainer'
-     echo -n '<token>' | gh secret set DOCKERHUB_TOKEN --repo turnerrainer/TIM
+     gh secret set DOCKERHUB_USERNAME --repo turnerrainer/tim --body 'turnerrainer'
+     echo -n '<token>' | gh secret set DOCKERHUB_TOKEN --repo turnerrainer/tim
      ```
   7. Push branch + tag:
      ```bash
      git push -u origin dev
-     git tag -a v0.1.0-rc.1 -m "TIM-on-Rust v0.1.0-rc.1 — first release candidate"
-     git push origin v0.1.0-rc.1
+     git tag -a v0.1.0-alpha.1 -m "TIM v0.1.0-alpha.1 — first alpha release"
+     git push origin v0.1.0-alpha.1
      ```
   8. After first publish, link GHCR package to the repo with **Write**
      role — see DEV-REQUIREMENTS §9.1 step 7.
@@ -91,7 +91,7 @@ Every command MUST exit 0:
 export TIM_DATABASE_URL=postgres://tim:changeme@localhost:5432/tim
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo build --release --bin tim-on-rust
+cargo build --release --bin tim
 cargo test --no-fail-fast
 cargo audit --deny warnings
 cargo deny check all

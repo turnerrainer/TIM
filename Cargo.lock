@@ -2345,8 +2345,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "tim-on-rust"
-version = "0.1.0-rc.1"
+name = "tim"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",

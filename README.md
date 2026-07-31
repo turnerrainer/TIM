@@ -1,4 +1,4 @@
-# TIM-on-Rust
+# TIM
 
 Token Identity Manager — Rust reimplementation of
 [buerokratt/TIM](https://github.com/buerokratt/TIM). Custom JWT lifecycle
@@ -6,9 +6,9 @@ Token Identity Manager — Rust reimplementation of
 multi-provider authentication + RFC 7662 token introspection, backed
 by PostgreSQL.
 
-**Version:** 0.1.0-rc.1 · **License:** Apache-2.0
+**Version:** 0.1.0-alpha.1 · **License:** Apache-2.0
 · **Docs:** [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
-· **Images:** `docker.io/turnerrainer/tim:rc`, `ghcr.io/turnerrainer/tim:rc`
+· **Images:** `docker.io/turnerrainer/tim:alpha`, `ghcr.io/turnerrainer/tim:alpha`
 
 ## One-command demo
 
@@ -36,8 +36,8 @@ recipe in [book/src/getting-started.md](book/src/getting-started.md).
 ## Build from source
 
 ```bash
-git clone -b dev https://github.com/turnerrainer/TIM.git tim-on-rust
-cd tim-on-rust
+git clone -b dev https://github.com/turnerrainer/tim.git
+cd tim
 docker compose up -d --build
 ```
 
@@ -66,7 +66,7 @@ docker compose up -d --build
 
 ## Documentation
 
-- **Book** — [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
+- **Book** — [turnerrainer.github.io/tim](https://turnerrainer.github.io/tim/)
   (getting started, config, OAuth2, failure modes)
 - **Design** — [`docs/DESIGN.md`](./docs/DESIGN.md) — full domain model
 - **Standards** — [`STANDARDS.md`](./STANDARDS.md) — project-specific

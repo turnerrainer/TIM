@@ -75,7 +75,7 @@ Every value TIM reads at runtime is one of:
 - A field in `tim.yaml`.
 - An env var named by a `_env` field in `tim.yaml`.
 - `RUST_LOG` — standard `tracing_subscriber::EnvFilter` syntax
-  (`info`, `debug`, `tim_on_rust=debug,sqlx=warn`).
+  (`info`, `debug`, `tim=debug,sqlx=warn`).
 
 There are no undocumented env vars.
 

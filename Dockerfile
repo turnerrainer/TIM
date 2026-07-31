@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/tim-on-rust /app/tim-on-rust
+COPY --from=builder /build/target/release/tim /app/tim
 # Ship the demo self-contained: tim.yaml + migrations baked in.
 # Operators bind-mount over any of these to override.
 COPY tim.yaml /app/tim.yaml
@@ -29,4 +29,4 @@ RUN useradd -m -u 1000 tim && chown -R tim:tim /app
 USER tim
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/app/tim-on-rust", "--config", "/app/tim.yaml"]
+CMD ["/app/tim", "--config", "/app/tim.yaml"]

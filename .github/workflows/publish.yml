@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to publish (e.g. v0.1.0-rc.1). Must already exist on the repo."
+        description: "Existing tag to publish (e.g. v0.1.0-alpha.1). Must already exist on the repo."
         required: true
         type: string
 
