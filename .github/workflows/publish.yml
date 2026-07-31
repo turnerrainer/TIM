@@ -173,9 +173,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Throwaway JWT signing key, valid PKCS#8 PEM, world-readable
-          # so uid 1000 in the container can open it.
+          # Throwaway JWT signing key, valid PKCS#8 PEM. Both the
+          # containing directory AND the file must be readable/
+          # traversable by uid 1000 (the container's `tim` user).
+          # `mktemp -d` defaults to mode 0700, which blocks the
+          # container user from even entering the dir — chmod both.
           key_dir="$(mktemp -d)"
+          chmod 755 "${key_dir}"
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
             -out "${key_dir}/jwt-private.pem"
           chmod 644 "${key_dir}/jwt-private.pem"
