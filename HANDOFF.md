@@ -35,16 +35,16 @@ This file is the entry point for the next contributor (human or agent). Read thi
 
 - **Cargo.toml `version = "0.1.0-alpha.1"`**, CHANGELOG `[0.1.0-alpha.1] - 2026-07-30`, `VERSION` = `0.1.0-alpha.1`, `docker-compose.yml image: tim:0.1.0-alpha.1`. All aligned.
 - Not yet tagged. First publish is a manual step by the maintainer:
-  1. `gh repo create turnerrainer/tim --public --source .`
-  2. Enable Pages: `gh api repos/turnerrainer/tim/pages -X POST -f 'build_type=workflow'`
+  1. `gh repo create turnerrainer/TIM --public --source .`
+  2. Enable Pages: `gh api repos/turnerrainer/TIM/pages -X POST -f 'build_type=workflow'`
   3. Workflow permissions Read+Write:
-     `gh api repos/turnerrainer/tim/actions/permissions/workflow -X PUT -F 'default_workflow_permissions=write' -F 'can_approve_pull_request_reviews=false'`
+     `gh api repos/turnerrainer/TIM/actions/permissions/workflow -X PUT -F 'default_workflow_permissions=write' -F 'can_approve_pull_request_reviews=false'`
   4. Create Docker Hub repo at <https://hub.docker.com/repositories/turnerrainer> → New repository → `tim` → Public.
   5. Generate a repo-scoped Docker Hub PAT (Read + Write + Delete on `turnerrainer/tim` only).
   6. Set secrets:
      ```bash
-     gh secret set DOCKERHUB_USERNAME --repo turnerrainer/tim --body 'turnerrainer'
-     echo -n '<token>' | gh secret set DOCKERHUB_TOKEN --repo turnerrainer/tim
+     gh secret set DOCKERHUB_USERNAME --repo turnerrainer/TIM --body 'turnerrainer'
+     echo -n '<token>' | gh secret set DOCKERHUB_TOKEN --repo turnerrainer/TIM
      ```
   7. Push branch + tag:
      ```bash

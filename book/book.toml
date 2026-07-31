@@ -8,9 +8,9 @@ src = "src"
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "light"
-git-repository-url = "https://github.com/turnerrainer/tim"
-edit-url-template = "https://github.com/turnerrainer/tim/edit/dev/book/{path}"
-site-url = "/tim/"
+git-repository-url = "https://github.com/turnerrainer/TIM"
+edit-url-template = "https://github.com/turnerrainer/TIM/edit/dev/book/{path}"
+site-url = "/TIM/"
 
 [output.html.search]
 enable = true

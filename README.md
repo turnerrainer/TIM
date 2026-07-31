@@ -36,7 +36,7 @@ recipe in [book/src/getting-started.md](book/src/getting-started.md).
 ## Build from source
 
 ```bash
-git clone -b dev https://github.com/turnerrainer/tim.git
+git clone -b dev https://github.com/turnerrainer/TIM.git
 cd tim
 docker compose up -d --build
 ```
@@ -66,7 +66,7 @@ docker compose up -d --build
 
 ## Documentation
 
-- **Book** — [turnerrainer.github.io/tim](https://turnerrainer.github.io/tim/)
+- **Book** — [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
   (getting started, config, OAuth2, failure modes)
 - **Design** — [`docs/DESIGN.md`](./docs/DESIGN.md) — full domain model
 - **Standards** — [`STANDARDS.md`](./STANDARDS.md) — project-specific

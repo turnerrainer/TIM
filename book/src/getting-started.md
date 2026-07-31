@@ -16,7 +16,7 @@ Nothing else. TIM's runtime is a self-contained container image.
 If you just want the published image, skip to step 3.
 
 ```bash
-git clone https://github.com/turnerrainer/tim.git
+git clone https://github.com/turnerrainer/TIM.git
 cd tim
 ```
 
@@ -121,7 +121,7 @@ with `cosign` installed:
 
 ```bash
 cosign verify docker.io/turnerrainer/tim:0.1.0-alpha.1 \
-  --certificate-identity-regexp 'https://github.com/turnerrainer/tim/' \
+  --certificate-identity-regexp '(?i)https://github\.com/turnerrainer/tim/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 

@@ -101,5 +101,5 @@ implementation, hardened per DEV-REQUIREMENTS.md.
 - `deny.toml` + `.cargo/audit.toml` mirrored (zero exceptions at
   this release).
 
-[Unreleased]: https://github.com/turnerrainer/tim/compare/v0.1.0-alpha.1...HEAD
-[0.1.0-alpha.1]: https://github.com/turnerrainer/tim/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/turnerrainer/TIM/releases/tag/v0.1.0-alpha.1

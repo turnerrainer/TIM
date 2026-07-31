@@ -62,7 +62,7 @@ curl -sX POST http://localhost:8085/jwt/custom/validate \
 - **RFC 7662 introspection** — a single endpoint that answers "is
   this token active?" for any TIM-issued custom JWT. Extension
   point registered for external-provider tokens (see
-  [task 005](https://github.com/turnerrainer/tim/blob/dev/tasks/backlog/005-jwks-external-token-validation.md)).
+  [task 005](https://github.com/turnerrainer/TIM/blob/dev/tasks/backlog/005-jwks-external-token-validation.md)).
 
 ## What TIM does NOT do
 
