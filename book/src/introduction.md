@@ -5,7 +5,7 @@ tracks, and validates JSON Web Tokens; brokers OAuth2 / OIDC
 authentication against upstream identity providers; and answers
 RFC 7662 introspection requests. Backed by PostgreSQL.
 
-**Version:** 0.2.0-alpha.1 · **License:** Apache-2.0
+**Version:** 0.2.0-alpha.2 · **License:** Apache-2.0
 
 ## One-command demo
 

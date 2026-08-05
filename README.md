@@ -6,7 +6,7 @@ Token Identity Manager — Rust reimplementation of
 multi-provider authentication + RFC 7662 token introspection, backed
 by PostgreSQL.
 
-**Version:** 0.2.0-alpha.1 · **License:** Apache-2.0
+**Version:** 0.2.0-alpha.2 · **License:** Apache-2.0
 · **Docs:** [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
 · **Images:** `docker.io/turnerrainer/tim:alpha`, `ghcr.io/turnerrainer/tim:alpha`
 

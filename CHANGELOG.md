@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-alpha.2] - 2026-08-05
+
+CI-only fix. Same runtime behaviour as `0.2.0-alpha.1`.
+
+The `0.2.0-alpha.1` container images were published to Docker Hub
+and GHCR but the publish workflow's smoke test failed (missing
+`TIM_ADMIN_TOKEN` env var — the shipped `tim.yaml` sets
+`security.require_admin_token: true`), which skipped the cosign
+signing step. `0.2.0-alpha.2` re-publishes with the smoke test
+fixed and with cosign signatures attached.
+
+Users pulling `docker.io/turnerrainer/tim:alpha` or
+`ghcr.io/turnerrainer/tim:alpha` get this version automatically.
+Users who explicitly pinned to `:0.2.0-alpha.1` should switch to
+`:0.2.0-alpha.2` for a cosign-signed image.
+
+### Fixed
+
+- `.github/workflows/publish.yml` — smoke test now sets
+  `TIM_ADMIN_TOKEN=smoke-only-not-a-real-secret` when launching
+  the container. Fix for the failed alpha.1 publish.
+
 ## [0.2.0-alpha.1] - 2026-08-05
 
 Second alpha. Post-audit release: fixes silent-drop bugs from
@@ -306,6 +328,7 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...HEAD
+[0.2.0-alpha.2]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/turnerrainer/TIM/compare/v0.1.0-alpha.1...v0.2.0-alpha.1
 [0.1.0-alpha.1]: https://github.com/turnerrainer/TIM/releases/tag/v0.1.0-alpha.1
