@@ -17,6 +17,7 @@ use tim::{
     jwt::JwtService,
     oauth2::{session::MemoryStore, ProviderRegistry},
     router::{build_router, AppState},
+    security::admin::AdminGate,
 };
 use tower::ServiceExt;
 
@@ -34,16 +35,26 @@ async fn setup() -> Option<(AppState, axum::Router)> {
         eprintln!("SKIP: TIM_DATABASE_URL not set (see DEV-REQUIREMENTS §3)");
         return None;
     };
-    let cfg = AppConfig::default();
+    // Tests run with the admin gate DISABLED — otherwise every
+    // privileged POST needs the token. Startup would refuse this in
+    // prod (require_admin_token defaults to true).
+    let mut cfg = AppConfig::default();
+    cfg.security.require_admin_token = false;
+    cfg.security.admin_token_env = String::new();
+    cfg.oauth2.session_sweep_interval_seconds = 0;
+
     let pool = db::connect(&db_url, &cfg.database).await.expect("connect");
     db::run_migrations(&pool).await.expect("migrate");
 
     // Tests share the schema; wipe rows for isolation. This is safe
     // because the CI database is a throwaway service container.
-    sqlx::query("TRUNCATE TABLE custom_jwt.denylist, custom_jwt.jwt_metadata, auth.oauth_state")
-        .execute(&pool)
-        .await
-        .expect("truncate");
+    sqlx::query(
+        "TRUNCATE TABLE custom_jwt.denylist, custom_jwt.jwt_metadata, \
+         auth.oauth_state, auth.session",
+    )
+    .execute(&pool)
+    .await
+    .expect("truncate");
 
     let signer = JwtSigner::from_pkcs8_pem(TEST_KEY, "it-key".into()).expect("signer");
     let jwt = Arc::new(JwtService::new(
@@ -57,6 +68,7 @@ async fn setup() -> Option<(AppState, axum::Router)> {
             .expect("registry"),
     );
     let sessions = Arc::new(MemoryStore::new(std::time::Duration::from_secs(60)));
+    let admin = AdminGate::from_config(&cfg.security).expect("admin gate");
     let state = AppState {
         config: Arc::new(cfg.clone()),
         db: pool,
@@ -64,6 +76,7 @@ async fn setup() -> Option<(AppState, axum::Router)> {
         jwt,
         providers,
         sessions,
+        admin,
     };
     let router = build_router(state.clone(), &cfg);
     Some((state, router))
@@ -139,8 +152,9 @@ async fn generate_validate_revoke_extend_flow() {
     let new_token = ext_body["token"].as_str().expect("new token").to_string();
     assert_ne!(new_token, token);
 
-    // Old token now revoked.
-    let (_s, body) = json_post(&router, "/jwt/custom/validate", json!({"token": token})).await;
+    // Old token now revoked — validate now returns 401 (finding 16).
+    let (s, body) = json_post(&router, "/jwt/custom/validate", json!({"token": token})).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
     assert_eq!(body["active"], false);
     assert_eq!(body["reason"], "revoked");
 
@@ -154,9 +168,11 @@ async fn generate_validate_revoke_extend_flow() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["status"], "revoked");
 
-    // Idempotent
-    let (_s, body) = json_post(&router, "/jwt/custom/revoke", json!({"token": new_token})).await;
-    assert_eq!(body["status"], "already");
+    // Idempotent — but now returns 409 with status "already_revoked"
+    // (finding 16).
+    let (s, body) = json_post(&router, "/jwt/custom/revoke", json!({"token": new_token})).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(body["status"], "already_revoked");
 }
 
 #[tokio::test]

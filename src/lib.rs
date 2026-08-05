@@ -11,5 +11,6 @@ pub mod introspect;
 pub mod jwt;
 pub mod oauth2;
 pub mod router;
+pub mod security;
 
 pub use error::TimError;

@@ -1,0 +1,17 @@
+{
+  "iss": "https://tara-test.ria.ee",
+  "sub": "60001019906",
+  "aud": "tim-tara-client",
+  "exp": 0,
+  "iat": 0,
+  "nonce": "",
+  "given_name": "Kärt",
+  "family_name": "Ööbik",
+  "date_of_birth": "1960-01-01",
+  "acr": "high",
+  "amr": ["mID"],
+  "profile_attributes": {
+    "given_name": "Ignored",
+    "family_name": "Ignored"
+  }
+}

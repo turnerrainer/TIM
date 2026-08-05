@@ -15,6 +15,12 @@ server:
   max_request_bytes: 1048576
   # Per-request timeout (seconds).
   request_timeout_seconds: 30
+  # Externally-reachable base URL. Used to synthesise the default
+  # OAuth2 callback URL when the caller omits `redirect_uri`. Set to
+  # your public hostname in production (e.g. "https://tim.example.com").
+  # Leaving empty forces every /auth/login request to pass
+  # ?redirect_uri= explicitly.
+  public_base_url: ""
 
 database:
   # Full Postgres URL. Format: postgres://user:pass@host:port/dbname
@@ -26,6 +32,10 @@ database:
   max_connections: 10
   # Automatically run migrations at startup.
   auto_migrate: true
+  # Connection lifecycle knobs (seconds; 0 = library default).
+  acquire_timeout_seconds: 30
+  idle_timeout_seconds: 600
+  max_lifetime_seconds: 1800
 
 jwt:
   # RSA private key location (PKCS#8 PEM). Loaded once at startup.
@@ -46,15 +56,54 @@ jwt:
   max_claims_bytes: 32768
   # Bulk-revoke cap. Requests above this are rejected 400.
   bulk_revoke_max: 100
+  # Cookie name used by the legacy compat endpoints
+  # `/jwt/userinfo`, `/jwt/custom-jwt-blacklist`, `/jwt/blacklist`
+  # (finding 31). Must match the name the DSL / browser client sets.
+  cookie_name: "jwt"
+
+# HTTP-layer security.
+security:
+  # Env var name that holds a shared secret required by privileged
+  # endpoints (/jwt/custom/generate, /revoke, /revoke/bulk, /extend).
+  # Callers present it as `X-TIM-Admin-Token: <secret>` or
+  # `Authorization: Bearer <secret>`. Empty means "no gate";
+  # startup emits a WARN log in that case.
+  admin_token_env: "TIM_ADMIN_TOKEN"
+  # Refuse to boot when admin_token_env is set but the env var is
+  # missing/empty. Default true; only flip in dev/test.
+  require_admin_token: true
+  # CORS: allow list of origins. `["*"]` for open CORS, empty for no
+  # CORS middleware at all (production behind a proxy that handles it).
+  cors_allowed_origins: []
+  # Security response headers. Empty string skips a given header.
+  content_security_policy: "default-src 'none'; frame-ancestors 'none'"
+  strict_transport_security: "max-age=63072000; includeSubDomains"
+  referrer_policy: "no-referrer"
+  x_frame_options: "DENY"
+  x_content_type_options: "nosniff"
 
 # OAuth2/OIDC providers. Fully config-driven. Add a provider by
 # appending a block; no code changes required for standard OIDC.
 oauth2:
-  # Where to persist authorization state and (future) sessions.
-  # MVP uses in-process DashMap; production should use Postgres.
+  # "memory" for single-replica / dev; "postgres" for multi-replica
+  # production (requires session_encryption_key_env).
   session_store: "memory"
   # OIDC discovery + JWKS cache TTL (seconds).
   discovery_cache_ttl_seconds: 3600
+  # Cap on session lifetime — the effective expiry is min(this,
+  # IdP expires_in). Default 24h.
+  session_ttl_seconds: 86400
+  # Background sweep interval for expired sessions + stale
+  # oauth_state rows. 0 disables (used by tests).
+  session_sweep_interval_seconds: 60
+  # Maximum age of an oauth_state row before the callback refuses to
+  # consume it (RFC 6749 §4.1.1 does not mandate a limit; 5 min
+  # matches JVM 2.0).
+  state_max_age_seconds: 300
+  # Env var holding a 32-byte (64 hex chars) key for AEAD-encrypting
+  # session token material at rest. Required when session_store is
+  # "postgres".
+  session_encryption_key_env: "TIM_SESSION_ENCRYPTION_KEY"
   providers: {}
   # Example (uncomment and fill in real values, secrets via env):
   # providers:
@@ -71,3 +120,7 @@ oauth2:
   #     token_validation:
   #       clock_skew_seconds: 60
   #       cache_ttl_seconds: 3600
+  #     # Allow-list of accepted redirect URIs. First entry is used
+  #     # as the default when the caller omits ?redirect_uri=.
+  #     allowed_redirect_uris:
+  #       - "https://tim.example.com/auth/callback/google"

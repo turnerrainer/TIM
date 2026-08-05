@@ -16,3 +16,16 @@
 .claude/
 tim.db
 *.log
+
+# In-house governance / audit artefacts. Kept locally for
+# maintainer use; not published to GitHub. Adding a new one? Also
+# add it here + remove it from tracking with `git rm --cached`.
+/findings/
+/tasks/
+/docs/
+/compat/
+/DIVERGENCES.md
+/REFACTO-DEVIATIONS.md
+/HANDOFF.md
+/book/src/reference/audit.md
+/book/src/reference/porting-application-yml.md

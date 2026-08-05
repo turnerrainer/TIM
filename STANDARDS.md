@@ -18,9 +18,6 @@ database. TIM integration tests connect to a real Postgres
 instance. Locally this is `docker compose up postgres`; in CI it is
 a service container (see `.github/workflows/tests.yml`).
 
-If you find yourself reaching for a mock, stop — the whole point of
-the rule is that mock/prod divergence eventually causes an outage.
-
 ### 2. RSA private key is loaded once, at startup
 
 The JWT signing key is loaded from a PKCS#8 PEM file at startup and
@@ -32,31 +29,46 @@ never re-read. To rotate:
 
 The old key's `kid` will disappear from JWKS. Downstream services
 that cache JWKS with a TTL keep validating tokens signed with the
-old key until the TTL expires. There is no in-process rotation
-endpoint — this is deliberate; see DEV-REQUIREMENTS §5.3
-("no admin HTTP endpoints").
+old key until the TTL expires.
 
-### 3. Session storage is in-process (MVP)
+### 3. Session storage — memory or Postgres
 
-The OAuth2 module's session cache is an in-process `DashMap`. This
-is **explicitly not** production-grade for multi-instance deploys —
-sessions do not survive process restart and do not span pods. The
-Postgres-backed session store is tracked as a backlog task; until it
-lands, deploy TIM behind a session-affinity load balancer
-or as a single replica.
+`oauth2.session_store: "memory"` (single-replica, no persistence
+across restart) or `"postgres"` (multi-replica, persisted, tokens
+AEAD-encrypted at rest via `oauth2.session_encryption_key_env`).
+The config value is *enforced* — anything else fails startup. See
+`book/src/oauth2.md` for the trade-off.
 
-This constraint is documented in `book/src/oauth2.md` and in
-`tim.yaml` next to the `session_store: "memory"` field.
+### 4. ID-token validation is mandatory
+
+Every OAuth2 callback runs the ID token through
+`oauth2::idtoken::verify`: JWKS-fetched signature, `iss` /
+`aud` / `exp` / `nbf` / `iat` (with configurable clock skew), and
+mandatory nonce match. Token responses without an ID token are
+rejected. No path skips this.
+
+### 5. Privileged endpoints require an admin token
+
+`/jwt/custom/generate`, `/revoke`, `/revoke/bulk`, `/extend` all
+require `X-TIM-Admin-Token` or `Authorization: Bearer` matching
+`security.admin_token_env`. Startup refuses when
+`security.require_admin_token = true` and the env var is missing.
+
+### 6. Sessions and oauth_state rows are swept
+
+A background task deletes expired sessions + stale `auth.oauth_state`
+rows every `oauth2.session_sweep_interval_seconds` (default 60 s).
+Set to 0 in tests.
 
 ## Deviations from DEV-REQUIREMENTS
 
-None currently. Every `Deviation:` line in commit history is
-enumerated here as it lands, per §0.
+None currently.
 
 ## Verification set
 
-Every one of these MUST exit 0 before a release. See
-`HANDOFF.md` for the exact one-liner.
+Every one of these MUST exit 0 before a release. Run under
+`--test-threads=1` because the integration tests share Postgres
+tables.
 
 ```
 cargo fmt --check

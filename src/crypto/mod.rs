@@ -107,6 +107,20 @@ impl JwtSigner {
             ]
         })
     }
+
+    /// Emit the public key as a PKCS#1 PEM string.
+    ///
+    /// Used by the legacy JVM 1.x `/jwt/verification-key` compat
+    /// endpoint (matrix row E01). PEM is the historical shape
+    /// downstream Java consumers of the original TIM expect.
+    pub fn public_pem(&self) -> Result<String> {
+        use rsa::pkcs1::EncodeRsaPublicKey;
+        self.inner
+            .public
+            .to_pkcs1_pem(rsa::pkcs8::LineEnding::LF)
+            .map(|p| p.to_string())
+            .map_err(|e| TimError::Crypto(format!("encode public PKCS#1 PEM: {e}")))
+    }
 }
 
 #[cfg(test)]

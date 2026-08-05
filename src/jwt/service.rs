@@ -74,7 +74,11 @@ impl JwtService {
         let now = Utc::now();
         let exp = now + Duration::minutes(req.expiration_in_minutes);
 
-        let extra = strip_reserved(req.content.clone());
+        let mut extra = strip_reserved(req.content.clone());
+        // Finding 17: inject `token_type: "custom_jwt"` so the JWT
+        // itself declares its type — matches JVM 2.0
+        // CustomJwtService.generate.
+        extra.insert("token_type".into(), Value::String("custom_jwt".into()));
         let claims = StandardClaims {
             iss: self.cfg.issuer.clone(),
             sub: subject.clone(),
@@ -86,8 +90,11 @@ impl JwtService {
         };
         let token = self.signer.sign(&claims)?;
 
-        let claim_keys = req
-            .content
+        // Finding 19: use the *signed* set of claim keys (i.e. after
+        // strip_reserved + token_type injection) so audit rows are
+        // consistent between `generate` and `extend`.
+        let claim_keys = claims
+            .extra
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>()
@@ -118,7 +125,8 @@ impl JwtService {
         .await?;
 
         Ok(TokenResponse {
-            status: "ok".into(),
+            // Finding 16: JVM returns "created" on generate.
+            status: "created".into(),
             jwt_name: req.jwt_name,
             token,
             expires_at: exp,
@@ -228,6 +236,29 @@ impl JwtService {
         permissive_validation()
     }
 
+    /// Bearer-token authenticator for `POST /jwt/custom/list/me`
+    /// (finding 13). Enforces signature + exp + denylist and returns
+    /// the token's `sub` claim on success. Any failure is a 401.
+    pub async fn authenticate_bearer(&self, token: &str) -> Result<String> {
+        let mut v = Validation::new(Algorithm::RS256);
+        v.validate_exp = true;
+        v.validate_aud = false;
+        v.required_spec_claims.clear();
+        let decoded = self
+            .signer
+            .verify::<StandardClaims>(token, &v)
+            .map_err(|e| {
+                tracing::debug!(error = %e, "authenticate_bearer: decode failed");
+                TimError::Unauthorized
+            })?;
+        let claims = decoded.claims;
+        let jti = Uuid::parse_str(&claims.jti).map_err(|_| TimError::Unauthorized)?;
+        if self.denylist_lookup(jti).await? {
+            return Err(TimError::Unauthorized);
+        }
+        claims.sub.ok_or(TimError::Unauthorized)
+    }
+
     /// Public denylist-check helper; the introspection module uses this
     /// to answer RFC 7662 `active` without duplicating the query.
     pub async fn denylist_lookup(&self, jti: Uuid) -> Result<bool> {
@@ -240,6 +271,44 @@ impl JwtService {
     }
 
     // --------------------- revoke ---------------------
+
+    /// Revoke by `jti` alone — used by the legacy `POST /jwt/blacklist?jwt=<uuid>`
+    /// endpoint (finding 31). Looks up the token's expiry in the
+    /// metadata table so the denylist row can be swept when it
+    /// expires. Returns:
+    ///   - `Ok(Some(true))` — newly revoked
+    ///   - `Ok(Some(false))` — was already denylisted (idempotent)
+    ///   - `Ok(None)` — no metadata for this jti (never issued by
+    ///     this TIM); caller returns 404.
+    pub async fn revoke_by_jti(&self, jti: Uuid, reason: Option<String>) -> Result<Option<bool>> {
+        let row: Option<(DateTime<Utc>,)> = sqlx::query_as(
+            r#"
+            SELECT expires_at FROM custom_jwt.jwt_metadata
+             WHERE jwt_uuid = $1
+             ORDER BY created_at DESC
+             LIMIT 1
+            "#,
+        )
+        .bind(jti)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((exp,)) = row else {
+            return Ok(None);
+        };
+        let result = sqlx::query(
+            r#"
+            INSERT INTO custom_jwt.denylist (jwt_uuid, expires_at, reason)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (jwt_uuid) DO NOTHING
+            "#,
+        )
+        .bind(jti)
+        .bind(exp)
+        .bind(reason.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(Some(result.rows_affected() == 1))
+    }
 
     /// Returns `true` if newly revoked; `false` if already denylisted.
     pub async fn revoke(&self, token: &str, reason: Option<String>) -> Result<bool> {
@@ -365,9 +434,9 @@ impl JwtService {
             }
         };
 
-        let exp_minutes = req
-            .expiration_in_minutes
-            .unwrap_or_else(|| (old.exp - old.iat) / 60);
+        // Finding 18: JVM defaults to 60 minutes when the caller
+        // omits expirationInMinutes.
+        let exp_minutes = req.expiration_in_minutes.unwrap_or(60);
         if exp_minutes <= 0 {
             return Err(TimError::BadRequest(
                 "expirationInMinutes must be > 0".into(),
@@ -375,6 +444,12 @@ impl JwtService {
         }
         let new_exp = now + Duration::minutes(exp_minutes);
         let new_jti = Uuid::new_v4();
+        let mut new_extra = old.extra.clone();
+        // Finding 17: ensure extended tokens carry token_type even if
+        // the ancestor pre-dated that behaviour.
+        new_extra
+            .entry("token_type".into())
+            .or_insert_with(|| Value::String("custom_jwt".into()));
         let new_claims = StandardClaims {
             iss: self.cfg.issuer.clone(),
             sub: old.sub.clone(),
@@ -382,11 +457,13 @@ impl JwtService {
             exp: new_exp.timestamp(),
             iat: now.timestamp(),
             jti: new_jti.to_string(),
-            extra: old.extra.clone(),
+            extra: new_extra,
         };
         let new_token = self.signer.sign(&new_claims)?;
 
-        let claim_keys = old
+        // Finding 19: use the *signed* extra set (new_claims.extra),
+        // which mirrors what generate stores.
+        let claim_keys = new_claims
             .extra
             .keys()
             .map(String::as_str)
@@ -436,8 +513,10 @@ impl JwtService {
         tx.commit().await?;
 
         Ok(TokenResponse {
-            status: "ok".into(),
-            jwt_name: jwt_name.unwrap_or_default(),
+            // Finding 16: JVM uses "extended" status + literal
+            // "EXTENDED_TOKEN" jwt_name for callers keying off this.
+            status: "extended".into(),
+            jwt_name: jwt_name.unwrap_or_else(|| "EXTENDED_TOKEN".to_string()),
             token: new_token,
             expires_at: new_exp,
         })
@@ -446,8 +525,16 @@ impl JwtService {
     // --------------------- list ---------------------
 
     pub async fn list_for_subject(&self, subject: &str, req: ListRequest) -> Result<ListResponse> {
-        let limit = req.limit.unwrap_or(50).clamp(1, 200);
-        let offset = req.offset.unwrap_or(0).max(0);
+        // Finding 14: JVM defaults are page=0, size=20; cap size at
+        // 200. Row-based callers can opt in via by_row=true.
+        let size = req.limit.unwrap_or(20).clamp(1, 200);
+        let (page, row_offset) = if req.by_row {
+            let off = req.offset.unwrap_or(0).max(0);
+            (off / size, off)
+        } else {
+            let p = req.offset.unwrap_or(0).max(0);
+            (p, p * size)
+        };
 
         type TokenRow = (
             Uuid,
@@ -467,8 +554,9 @@ impl JwtService {
                AND ($3::timestamptz IS NULL OR issued_at <= $3)
                AND ($4::timestamptz IS NULL OR expires_at >= $4)
                AND ($5::timestamptz IS NULL OR expires_at <= $5)
+               AND ($6::text IS NULL OR jwt_name = $6)
              ORDER BY issued_at DESC
-             LIMIT $6 OFFSET $7
+             LIMIT $7 OFFSET $8
             "#,
         )
         .bind(subject)
@@ -476,8 +564,9 @@ impl JwtService {
         .bind(req.issued_before)
         .bind(req.expires_after)
         .bind(req.expires_before)
-        .bind(limit)
-        .bind(offset)
+        .bind(req.jwt_name.as_deref())
+        .bind(size)
+        .bind(row_offset)
         .fetch_all(&self.pool)
         .await?;
 
@@ -486,9 +575,19 @@ impl JwtService {
             SELECT COUNT(*)
               FROM custom_jwt.jwt_metadata
              WHERE subject = $1
+               AND ($2::timestamptz IS NULL OR issued_at >= $2)
+               AND ($3::timestamptz IS NULL OR issued_at <= $3)
+               AND ($4::timestamptz IS NULL OR expires_at >= $4)
+               AND ($5::timestamptz IS NULL OR expires_at <= $5)
+               AND ($6::text IS NULL OR jwt_name = $6)
             "#,
         )
         .bind(subject)
+        .bind(req.issued_after)
+        .bind(req.issued_before)
+        .bind(req.expires_after)
+        .bind(req.expires_before)
+        .bind(req.jwt_name.as_deref())
         .fetch_one(&self.pool)
         .await?;
 
@@ -518,12 +617,20 @@ impl JwtService {
             });
         }
 
+        let total_pages = if size == 0 {
+            0
+        } else {
+            (total + size - 1) / size
+        };
         Ok(ListResponse {
             tokens,
             pagination: Pagination {
                 total,
-                offset,
-                limit,
+                offset: row_offset,
+                limit: size,
+                page,
+                size,
+                total_pages,
             },
         })
     }

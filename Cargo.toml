@@ -1,6 +1,6 @@
 [package]
 name = "tim"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Rainer Türner"]
@@ -13,7 +13,7 @@ repository = "https://github.com/turnerrainer/TIM"
 axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["trace", "limit", "timeout"] }
+tower-http = { version = "0.5", features = ["trace", "limit", "timeout", "cors", "set-header"] }
 
 # Serialisation
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +32,10 @@ jsonwebtoken = "9"
 rsa = { version = "0.9", features = ["pem", "sha2"] }
 sha2 = "0.10"
 base64 = "0.22"
+# AEAD for at-rest encryption of session token material.
+chacha20poly1305 = "0.10"
+# Constant-time comparison for admin-token check.
+subtle = "2"
 
 # Concurrency primitives
 dashmap = "6"
@@ -44,6 +48,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 url = "2"
 rand = "0.8"
+
+# async trait objects for the SessionStore trait
+async-trait = "0.1"
 
 # Observability
 tracing = "0.1"

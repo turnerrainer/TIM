@@ -9,10 +9,11 @@ use tim::{
     crypto::JwtSigner,
     db,
     jwt::JwtService,
-    oauth2::ProviderRegistry,
+    oauth2::{session as sessions_mod, state_sweeper, ProviderRegistry},
     router::{build_router, AppState},
+    security::admin::AdminGate,
 };
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -34,14 +35,12 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let config = AppConfig::load(cli.config.as_deref()).context("failed to load config")?;
+    config.validate().context("config validation")?;
     info!(bind = %config.server.bind, port = config.server.port, "loaded config");
-
-    if config.oauth2.session_store == "memory" {
-        warn!(
-            "OAuth2 session store is 'memory' (in-process). Sessions will not survive restart or span replicas. \
-             See STANDARDS.md §Project-specific extras and tasks/backlog/002-oauth2-session-store.md."
-        );
-    }
+    // Boot-time diagnostic pass — logs every parsed config field
+    // at INFO with WARN on non-secure or attention-required
+    // settings. Grep `tim::config::diagnose` in logs.
+    config.diagnose();
 
     let signer = JwtSigner::load_from_pem(&config.jwt.private_key_path, config.jwt.key_id.clone())
         .with_context(|| {
@@ -66,6 +65,10 @@ async fn main() -> Result<()> {
 
     let jwt_service = JwtService::new(pool.clone(), signer.clone(), config.jwt.clone());
     let providers = ProviderRegistry::from_config(&config.oauth2).await?;
+    let sessions = sessions_mod::build(&config, pool.clone()).await?;
+    let admin = AdminGate::from_config(&config.security)?;
+
+    state_sweeper::spawn(&config.oauth2, pool.clone(), sessions.clone());
 
     let state = AppState {
         config: Arc::new(config.clone()),
@@ -73,7 +76,8 @@ async fn main() -> Result<()> {
         signer: Arc::new(signer),
         jwt: Arc::new(jwt_service),
         providers: Arc::new(providers),
-        sessions: Arc::new(oauth2_session_store(&config)),
+        sessions,
+        admin,
     };
 
     let addr: SocketAddr = format!("{}:{}", config.server.bind, config.server.port).parse()?;
@@ -83,9 +87,4 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
     Ok(())
-}
-
-fn oauth2_session_store(config: &AppConfig) -> tim::oauth2::session::MemoryStore {
-    let ttl = std::time::Duration::from_secs(config.oauth2.session_ttl_seconds);
-    tim::oauth2::session::MemoryStore::new(ttl)
 }

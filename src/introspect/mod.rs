@@ -40,6 +40,18 @@ pub struct IntrospectionResponse {
     pub extra_claims: BTreeMap<String, Value>,
 }
 
+impl IntrospectionResponse {
+    /// RFC 7662 §2.2 — inactive responses SHOULD carry no additional
+    /// data. Finding 21: enforce this at a single point instead of
+    /// leaking claims on the expired/revoked paths.
+    pub fn inactive() -> Self {
+        Self {
+            active: false,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct IntrospectRequest {
     pub token: String,
@@ -63,55 +75,28 @@ impl Introspector {
             Ok(d) => d.claims,
             Err(e) => {
                 tracing::debug!(error = %e, "introspect: token decode failed");
-                // Malformed or wrong signature — RFC 7662 §2.2 says
-                // return active: false without leaking why.
-                return Ok(IntrospectionResponse {
-                    active: false,
-                    ..Default::default()
-                });
+                return Ok(IntrospectionResponse::inactive());
             }
         };
 
-        let issuer_matches = claims.iss == self.jwt.cfg().issuer;
-        if !issuer_matches {
-            // Unknown issuer — hook point for task 005 (external
-            // JWKS validators). MVP returns inactive per RFC 7662.
-            return Ok(IntrospectionResponse {
-                active: false,
-                ..Default::default()
-            });
+        if claims.iss != self.jwt.cfg().issuer {
+            return Ok(IntrospectionResponse::inactive());
         }
 
         let now = Utc::now().timestamp();
         if claims.exp < now {
-            return Ok(IntrospectionResponse {
-                active: false,
-                iss: Some(claims.iss),
-                sub: claims.sub,
-                exp: Some(claims.exp),
-                iat: Some(claims.iat),
-                jti: Some(claims.jti),
-                aud: claims.aud,
-                token_type: Some("custom_jwt".into()),
-                extra_claims: claims.extra,
-                ..Default::default()
-            });
+            return Ok(IntrospectionResponse::inactive());
         }
-        // Denylist check.
         let jti_uuid = match Uuid::parse_str(&claims.jti) {
             Ok(u) => u,
-            Err(_) => {
-                return Ok(IntrospectionResponse {
-                    active: false,
-                    ..Default::default()
-                });
-            }
+            Err(_) => return Ok(IntrospectionResponse::inactive()),
         };
-        let denylisted = self.is_denylisted(jti_uuid).await?;
-        let active = !denylisted;
+        if self.jwt.denylist_lookup(jti_uuid).await? {
+            return Ok(IntrospectionResponse::inactive());
+        }
 
         Ok(IntrospectionResponse {
-            active,
+            active: true,
             iss: Some(claims.iss),
             sub: claims.sub,
             aud: claims.aud,
@@ -122,13 +107,6 @@ impl Introspector {
             extra_claims: claims.extra,
             ..Default::default()
         })
-    }
-
-    async fn is_denylisted(&self, jti: Uuid) -> Result<bool> {
-        // Reach into the JWT service's pool via a fresh query — we
-        // don't expose the pool publicly. Reuse via a small helper.
-        // (Keeping the pool private preserves encapsulation.)
-        self.jwt.denylist_lookup(jti).await
     }
 
     pub fn supported_types(&self) -> serde_json::Value {

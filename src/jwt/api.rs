@@ -103,12 +103,22 @@ pub struct BulkRevokeItem {
     pub reason: Option<String>,
 }
 
+/// Finding 14 restores JVM 2.0 semantics: `offset` is a *page number*
+/// (0-based), `limit` is the *page size* (default 20). Row-based
+/// callers can still ask for row offsets by setting `by_row: true`.
+/// The response exposes both `page/size/totalPages` (JVM shape) AND
+/// `offset/limit` (row shape) so no client is stranded.
 #[derive(Debug, Deserialize, Default)]
 pub struct ListRequest {
+    /// Page number in JVM mode; row offset when `by_row = true`.
     #[serde(default)]
     pub offset: Option<i64>,
+    /// Page size (JVM: default 20; capped at 200).
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Opt-in: interpret `offset` as row offset instead of page.
+    #[serde(default, rename = "byRow", alias = "by_row")]
+    pub by_row: bool,
     #[serde(default, rename = "issuedAfter", alias = "issued_after")]
     pub issued_after: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, rename = "issuedBefore", alias = "issued_before")]
@@ -117,6 +127,9 @@ pub struct ListRequest {
     pub expires_after: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, rename = "expiresBefore", alias = "expires_before")]
     pub expires_before: Option<chrono::DateTime<chrono::Utc>>,
+    /// Extra Java-parity filter (was in `findByUserFilters`).
+    #[serde(default, rename = "jwtName", alias = "jwt_name")]
+    pub jwt_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -125,11 +138,16 @@ pub struct ListResponse {
     pub pagination: Pagination,
 }
 
+/// Both shapes populated (finding 14): JVM callers read `page`,
+/// `size`, `total_pages`; row-based callers read `offset`, `limit`.
 #[derive(Debug, Serialize)]
 pub struct Pagination {
     pub total: i64,
     pub offset: i64,
     pub limit: i64,
+    pub page: i64,
+    pub size: i64,
+    pub total_pages: i64,
 }
 
 #[derive(Debug, Serialize)]

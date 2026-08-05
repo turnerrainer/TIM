@@ -14,6 +14,7 @@ use tim::{
     jwt::JwtService,
     oauth2::{session::MemoryStore, ProviderRegistry},
     router::{build_router, AppState},
+    security::admin::AdminGate,
 };
 use tower::ServiceExt;
 
@@ -24,7 +25,10 @@ async fn setup() -> Option<axum::Router> {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
-    let cfg = AppConfig::default();
+    let mut cfg = AppConfig::default();
+    cfg.security.require_admin_token = false;
+    cfg.security.admin_token_env = String::new();
+    cfg.oauth2.session_sweep_interval_seconds = 0;
     let pool = db::connect(&db_url, &cfg.database).await.ok()?;
     db::run_migrations(&pool).await.ok()?;
     let signer = JwtSigner::from_pkcs8_pem(TEST_KEY, "oauth2-it".into()).ok()?;
@@ -35,6 +39,7 @@ async fn setup() -> Option<axum::Router> {
     ));
     let providers = Arc::new(ProviderRegistry::from_config(&cfg.oauth2).await.ok()?);
     let sessions = Arc::new(MemoryStore::new(std::time::Duration::from_secs(60)));
+    let admin = AdminGate::from_config(&cfg.security).ok()?;
     let state = AppState {
         config: Arc::new(cfg.clone()),
         db: pool,
@@ -42,6 +47,7 @@ async fn setup() -> Option<axum::Router> {
         jwt,
         providers,
         sessions,
+        admin,
     };
     Some(build_router(state, &cfg))
 }
@@ -111,6 +117,16 @@ async fn session_validate_missing_returns_404() {
     let Some(router) = setup().await else {
         return;
     };
+    // Legacy ?session_id= transport still accepted (finding 27).
     let (s, _) = get(&router, "/auth/session/validate?session_id=nosuch").await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn session_validate_without_id_is_unauthorized() {
+    let Some(router) = setup().await else {
+        return;
+    };
+    let (s, _) = get(&router, "/auth/session/validate").await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
