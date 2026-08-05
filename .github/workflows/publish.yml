@@ -207,8 +207,12 @@ jobs:
 
             docker image rm -f "${IMAGE}" >/dev/null 2>&1 || true
             docker pull --quiet --platform "${platform}" "${IMAGE}"
+            # TIM's shipped tim.yaml requires TIM_ADMIN_TOKEN
+            # (security.require_admin_token: true). Smoke test uses
+            # a throwaway value; no privileged endpoint is exercised.
             tim_cid="$(docker run -d --platform "${platform}" \
                        -e TIM_DATABASE_URL="postgres://tim:smoke@${pg_ip}:5432/tim" \
+                       -e TIM_ADMIN_TOKEN=smoke-only-not-a-real-secret \
                        -v "${key_dir}:/opt/tim/keys:ro" \
                        -p 18085:8085 "${IMAGE}")"
 
