@@ -233,6 +233,27 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// reach `sub` from the mapping; the initial implementation only
 /// looked in `extra` and silently returned nothing for
 /// `personal_code: "sub"`.
+/// Resolve a claim name, walking `.`-separated segments into nested objects.
+///
+/// A name without a dot is a plain top-level lookup, so providers that put claims at the top
+/// level behave exactly as before. TARA carries the names under `profile_attributes`, and
+/// without this a mapping of `profile_attributes.given_name` resolves to nothing and the
+/// profile comes back with empty names.
+///
+/// There is no fallback between the two forms: a dotted path that does not exist yields None
+/// rather than quietly matching a top-level claim with the same trailing name.
+fn resolve_claim_path(
+    extra: &HashMap<String, serde_json::Value>,
+    path: &str,
+) -> Option<serde_json::Value> {
+    let mut segments = path.split('.');
+    let mut current = extra.get(segments.next()?)?;
+    for segment in segments {
+        current = current.as_object()?.get(segment)?;
+    }
+    Some(current.clone())
+}
+
 pub fn profile_from_claims(
     provider: &Provider,
     claims: &IdTokenClaims,
@@ -248,7 +269,7 @@ pub fn profile_from_claims(
                 AudClaim::Single(s) => serde_json::json!([s]),
                 AudClaim::Multi(v) => serde_json::json!(v),
             }),
-            _ => claims.extra.get(provider_key).cloned(),
+            _ => resolve_claim_path(&claims.extra, provider_key),
         };
         if let Some(v) = v {
             profile.insert(canonical.clone(), v);
@@ -282,4 +303,45 @@ mod tests {
     // token, expose a mock JWKS, and route through `verify`. Lives in
     // `tests/it_oauth2_callback.rs` (finding 01 was masked because no
     // such test existed).
+
+    fn tara_extra() -> HashMap<String, serde_json::Value> {
+        // Shaped like a real TARA id_token: names only under profile_attributes.
+        serde_json::from_value(serde_json::json!({
+            "acr": "high",
+            "profile_attributes": {
+                "given_name": "MARY ÄNN",
+                "family_name": "O’CONNEŽ-ŠUSLIK",
+                "date_of_birth": "2000-01-01"
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn dotted_path_reads_nested_claim() {
+        let e = tara_extra();
+        assert_eq!(
+            resolve_claim_path(&e, "profile_attributes.given_name"),
+            Some(serde_json::Value::String("MARY ÄNN".into()))
+        );
+    }
+
+    #[test]
+    fn undotted_name_still_reads_top_level() {
+        let e = tara_extra();
+        assert_eq!(
+            resolve_claim_path(&e, "acr"),
+            Some(serde_json::Value::String("high".into()))
+        );
+    }
+
+    #[test]
+    fn missing_path_does_not_fall_back_to_trailing_name() {
+        let e = tara_extra();
+        // `acr` exists at the top level; the dotted form must not find it anyway.
+        assert_eq!(resolve_claim_path(&e, "profile_attributes.acr"), None);
+        assert_eq!(resolve_claim_path(&e, "nope.given_name"), None);
+        // Walking into a non-object is a miss, not a panic.
+        assert_eq!(resolve_claim_path(&e, "acr.given_name"), None);
+    }
 }
