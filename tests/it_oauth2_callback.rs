@@ -24,6 +24,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 
 async fn setup_with_provider(server_url: &str) -> Option<axum::Router> {
@@ -31,6 +33,7 @@ async fn setup_with_provider(server_url: &str) -> Option<axum::Router> {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     let pool = db::connect(
         &db_url,
         &tim::config::DatabaseConfig {

@@ -18,6 +18,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 const ADMIN_ENV: &str = "TIM_ADMIN_TOKEN_COMPAT_IT";
 const ADMIN_VAL: &str = "compat-admin-secret";
@@ -27,6 +29,7 @@ async fn setup() -> Option<axum::Router> {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     let mut cfg = AppConfig::default();
     // Compat endpoints under test — enable the admin gate so we can
     // prove it's enforced on the blacklist endpoints (userinfo stays

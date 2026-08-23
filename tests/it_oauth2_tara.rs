@@ -25,6 +25,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TIM_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 const TARA_CANONICAL: &str = include_str!("fixtures/tara-claims-canonical.json");
 
@@ -37,6 +39,7 @@ async fn setup_tara(server_url: &str, clock_skew_seconds: u64) -> Option<axum::R
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     let pool = db::connect(&db_url, &tim::config::DatabaseConfig::default())
         .await
         .ok()?;

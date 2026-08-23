@@ -25,6 +25,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 
 async fn base_router() -> Option<(axum::Router, sqlx::PgPool, Arc<JwtService>)> {
@@ -32,6 +34,7 @@ async fn base_router() -> Option<(axum::Router, sqlx::PgPool, Arc<JwtService>)> 
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     let pool = db::connect(&db_url, &DatabaseConfig::default())
         .await
         .ok()?;
@@ -410,6 +413,7 @@ async fn db_pool_accepts_tuning_knobs() {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return;
     };
+    common::serialize_binary(&db_url).await;
     let cfg = DatabaseConfig {
         url_env: "TIM_DATABASE_URL".into(),
         min_connections: 1,

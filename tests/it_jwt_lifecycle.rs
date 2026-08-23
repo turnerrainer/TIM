@@ -21,6 +21,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 
 async fn setup() -> Option<(AppState, axum::Router)> {
@@ -35,6 +37,7 @@ async fn setup() -> Option<(AppState, axum::Router)> {
         eprintln!("SKIP: TIM_DATABASE_URL not set (see DEV-REQUIREMENTS §3)");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     // Tests run with the admin gate DISABLED — otherwise every
     // privileged POST needs the token. Startup would refuse this in
     // prod (require_admin_token defaults to true).

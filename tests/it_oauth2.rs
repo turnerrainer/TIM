@@ -18,6 +18,8 @@ use tim::{
 };
 use tower::ServiceExt;
 
+mod common;
+
 const TEST_KEY: &str = include_str!("fixtures/test-jwt-private.pem");
 
 async fn setup() -> Option<axum::Router> {
@@ -25,6 +27,7 @@ async fn setup() -> Option<axum::Router> {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
     };
+    common::serialize_binary(&db_url).await;
     let mut cfg = AppConfig::default();
     cfg.security.require_admin_token = false;
     cfg.security.admin_token_env = String::new();
