@@ -56,7 +56,13 @@ jobs:
       - name: build
         run: cargo build --release --bin tim
       - name: cargo test
-        run: cargo test --release --no-fail-fast
+        # `--test-threads=1` serialises tests WITHIN each binary; the
+        # PG advisory lock in tests/common/mod.rs serialises binaries
+        # against each other. Both are required — without intra-binary
+        # serialisation, one test's setup() TRUNCATE can wipe another
+        # test's freshly-inserted oauth_state row, or deadlock against
+        # its concurrent INSERT (PG error 40P01).
+        run: cargo test --release --no-fail-fast -- --test-threads=1
 
   docs-build:
     runs-on: ubuntu-latest
