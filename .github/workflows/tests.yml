@@ -37,9 +37,9 @@ jobs:
     env:
       TIM_DATABASE_URL: postgres://tim:cipassword@localhost:5432/tim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -61,7 +61,7 @@ jobs:
   docs-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install mdBook
         run: |
           MDBOOK_VERSION=0.4.40
