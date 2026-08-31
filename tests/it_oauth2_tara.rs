@@ -35,6 +35,25 @@ const TARA_CANONICAL: &str = include_str!("fixtures/tara-claims-canonical.json")
 /// verifier enforces `iss == discovery.issuer` and both must match
 /// the JWT `iss` claim later.
 async fn setup_tara(server_url: &str, clock_skew_seconds: u64) -> Option<axum::Router> {
+    setup_tara_with_mappings(server_url, clock_skew_seconds, default_tara_mappings()).await
+}
+
+fn default_tara_mappings() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("personal_code", "sub"),
+        ("first_name", "given_name"),
+        ("last_name", "family_name"),
+        ("date_of_birth", "date_of_birth"),
+        ("acr", "acr"),
+        ("amr", "amr"),
+    ]
+}
+
+async fn setup_tara_with_mappings(
+    server_url: &str,
+    clock_skew_seconds: u64,
+    mappings: Vec<(&'static str, &'static str)>,
+) -> Option<axum::Router> {
     let Ok(db_url) = std::env::var("TIM_DATABASE_URL") else {
         eprintln!("SKIP: TIM_DATABASE_URL not set");
         return None;
@@ -71,15 +90,7 @@ async fn setup_tara(server_url: &str, clock_skew_seconds: u64) -> Option<axum::R
         },
         allowed_redirect_uris: vec!["https://tim.example.com/auth/callback/tara".into()],
     };
-    // TARA-specific claim mapping — sub is the personal code.
-    for (canonical, provider_key) in [
-        ("personal_code", "sub"),
-        ("first_name", "given_name"),
-        ("last_name", "family_name"),
-        ("date_of_birth", "date_of_birth"),
-        ("acr", "acr"),
-        ("amr", "amr"),
-    ] {
+    for (canonical, provider_key) in mappings {
         provider
             .claim_mappings
             .insert(canonical.into(), provider_key.into());
@@ -474,4 +485,91 @@ async fn tara_profile_attributes_are_not_flattened_into_top_level() {
     // silently, first_name would be "Ignored".
     assert_eq!(body["user_profile"]["first_name"], "Kärt");
     assert_ne!(body["user_profile"]["first_name"], "Ignored");
+}
+
+// ---------------------------------------------------------------------------
+// Test 8: dotted claim mapping resolves nested profile_attributes end-to-end.
+// ---------------------------------------------------------------------------
+
+// finding: nested claim mapping. TARA carries given_name/family_name only under
+// profile_attributes, and the pre-fix flat lookup returned nothing for a dotted mapping.
+// This is the seam that the resolve_claim_path unit tests do NOT exercise — it verifies
+// profile_from_claims actually reads through resolve_claim_path when the mapping key is
+// dotted. Uses the canonical fixture whose profile_attributes contain "Ignored" — a bug
+// that fell back to top-level `given_name` would flip first_name to "Kärt", so the
+// assertions pin the nested value specifically.
+#[tokio::test]
+async fn tara_dotted_mapping_resolves_nested_profile_attributes() {
+    let mut server = mockito::Server::new_async().await;
+    let base = server.url();
+    let (_sk, pk, pem) = generate_idp_keypair();
+    let kid = "tara-kid-1";
+
+    let _disc = mock_discovery(&mut server, &base).await;
+    let _jwks = mock_jwks(&mut server, &pk, kid).await;
+
+    let mappings = vec![
+        ("personal_code", "sub"),
+        ("first_name", "profile_attributes.given_name"),
+        ("last_name", "profile_attributes.family_name"),
+    ];
+    let Some(router) = setup_tara_with_mappings(&base, 60, mappings).await else {
+        return;
+    };
+    let (state, nonce) = start_flow(&router).await;
+    let claims = tara_claims(&base, &nonce, 300);
+    let id_token = sign_id_token(&pem, &claims, kid);
+    let _tok = mock_token(&mut server, &id_token).await;
+
+    let (s, body) = get_json(
+        &router,
+        &format!("/auth/callback/tara?code=any&state={state}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "callback body: {body:?}");
+    // Nested values, not the top-level "Kärt"/"Ööbik".
+    assert_eq!(body["user_profile"]["first_name"], "Ignored");
+    assert_eq!(body["user_profile"]["last_name"], "Ignored");
+}
+
+// finding: dotted-path miss must not fall through to a top-level claim with the same
+// trailing segment. The fixture has both `given_name` at the top level and
+// `profile_attributes.given_name` nested; if the mapping asks for a dotted path whose
+// prefix does not exist, the result should be None (claim omitted from the profile), NOT
+// the top-level `given_name`.
+#[tokio::test]
+async fn tara_dotted_mapping_miss_does_not_fall_back_to_top_level() {
+    let mut server = mockito::Server::new_async().await;
+    let base = server.url();
+    let (_sk, pk, pem) = generate_idp_keypair();
+    let kid = "tara-kid-1";
+
+    let _disc = mock_discovery(&mut server, &base).await;
+    let _jwks = mock_jwks(&mut server, &pk, kid).await;
+
+    // `no_such_object.given_name` — first segment does not exist. The top-level
+    // `given_name` MUST NOT be returned.
+    let mappings = vec![
+        ("personal_code", "sub"),
+        ("first_name", "no_such_object.given_name"),
+    ];
+    let Some(router) = setup_tara_with_mappings(&base, 60, mappings).await else {
+        return;
+    };
+    let (state, nonce) = start_flow(&router).await;
+    let claims = tara_claims(&base, &nonce, 300);
+    let id_token = sign_id_token(&pem, &claims, kid);
+    let _tok = mock_token(&mut server, &id_token).await;
+
+    let (s, body) = get_json(
+        &router,
+        &format!("/auth/callback/tara?code=any&state={state}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "callback body: {body:?}");
+    assert!(
+        body["user_profile"]["first_name"].is_null(),
+        "first_name must be absent, got {:?}",
+        body["user_profile"]["first_name"]
+    );
 }

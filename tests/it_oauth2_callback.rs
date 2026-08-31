@@ -322,6 +322,164 @@ async fn callback_rejects_tampered_id_token_signature() {
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+// finding: token endpoint auth method. TARA (and OIDC Core §9 as the default when the
+// client registration is silent) requires HTTP Basic. The pre-fix behaviour posted
+// client_id/client_secret as form fields, which TARA rejected with 401 invalid_client and
+// no existing test caught it because the token mock accepted every request shape. This
+// asserts both sides: header present with the right value, credentials absent from body.
+#[tokio::test]
+async fn token_exchange_uses_http_basic_and_omits_credentials_from_form_body() {
+    let mut server = mockito::Server::new_async().await;
+    let base = server.url();
+    let (_sk, pk, pem) = generate_idp_keypair();
+    let kid = "idp-kid-1";
+
+    let discovery_body = json!({
+        "issuer": base.clone(),
+        "authorization_endpoint": format!("{base}/authorize"),
+        "token_endpoint": format!("{base}/token"),
+        "jwks_uri": format!("{base}/jwks"),
+        "grant_types_supported": ["authorization_code"],
+        "response_types_supported": ["code"],
+    })
+    .to_string();
+    let _m_disc = server
+        .mock("GET", "/.well-known/openid-configuration")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(&discovery_body)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+    let jwks_body = json!({ "keys": [ jwk_from_public(&pk, kid) ] }).to_string();
+    let _m_jwks = server
+        .mock("GET", "/jwks")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(&jwks_body)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let Some(router) = setup_with_provider(&base).await else {
+        return;
+    };
+    let (_s, body) = get_json(&router, "/auth/login/mock").await;
+    let state = body["state"].as_str().unwrap().to_string();
+    let db_url = std::env::var("TIM_DATABASE_URL").unwrap();
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    let (nonce,): (String,) = sqlx::query_as("SELECT nonce FROM auth.oauth_state WHERE state = $1")
+        .bind(&state)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let now = chrono::Utc::now().timestamp();
+    let claims = json!({
+        "iss": base.clone(),
+        "sub": "user-xyz",
+        "aud": "tim-client",
+        "exp": now + 300,
+        "iat": now,
+        "nonce": nonce,
+    });
+    let id_token = sign_id_token(&pem, &claims, kid);
+    let token_body = json!({
+        "access_token": "x",
+        "id_token": id_token,
+        "token_type": "Bearer",
+        "expires_in": 60,
+    })
+    .to_string();
+
+    let expected_basic = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(b"tim-client:shhh")
+    );
+    // Body regex is anchored — appending `&client_id=...&client_secret=...` (the pre-fix
+    // behaviour) breaks the match and mockito returns 501, which surfaces as a 502
+    // callback and fails the OK assertion below.
+    let m_tok = server
+        .mock("POST", "/token")
+        .match_header("authorization", expected_basic.as_str())
+        .match_body(mockito::Matcher::Regex(
+            r"^grant_type=authorization_code&code=any-code(?:&redirect_uri=[^&]+)?$".into(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(&token_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let (s, body) = get_json(
+        &router,
+        &format!("/auth/callback/mock?code=any-code&state={state}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "callback body: {body:?}");
+    m_tok.assert_async().await;
+}
+
+// finding: token exchange non-2xx path. Confirms the callback surfaces a 502 (and does not
+// panic on `resp.text()` for the error body) when the token endpoint reports an OAuth2
+// error response. The response body is deliberately non-empty so that if the fix later
+// changed to require valid JSON, we'd notice.
+#[tokio::test]
+async fn callback_returns_bad_gateway_when_token_endpoint_reports_error() {
+    let mut server = mockito::Server::new_async().await;
+    let base = server.url();
+    let (_sk, pk, _pem) = generate_idp_keypair();
+    let kid = "idp-kid-1";
+
+    let discovery_body = json!({
+        "issuer": base.clone(),
+        "authorization_endpoint": format!("{base}/authorize"),
+        "token_endpoint": format!("{base}/token"),
+        "jwks_uri": format!("{base}/jwks"),
+        "grant_types_supported": ["authorization_code"],
+        "response_types_supported": ["code"],
+    })
+    .to_string();
+    let _m_disc = server
+        .mock("GET", "/.well-known/openid-configuration")
+        .with_status(200)
+        .with_body(&discovery_body)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+    let jwks_body = json!({ "keys": [ jwk_from_public(&pk, kid) ] }).to_string();
+    let _m_jwks = server
+        .mock("GET", "/jwks")
+        .with_status(200)
+        .with_body(&jwks_body)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let Some(router) = setup_with_provider(&base).await else {
+        return;
+    };
+    let (_s, body) = get_json(&router, "/auth/login/mock").await;
+    let state = body["state"].as_str().unwrap().to_string();
+
+    let _m_tok = server
+        .mock("POST", "/token")
+        .with_status(401)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"error":"invalid_client","error_description":"pinned diagnostic"}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let (s, _body) = get_json(
+        &router,
+        &format!("/auth/callback/mock?code=any-code&state={state}"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+}
+
 #[tokio::test]
 async fn callback_bubbles_idp_error_param() {
     // No mocks needed — the error path never contacts the IdP.

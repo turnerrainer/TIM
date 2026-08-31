@@ -180,14 +180,16 @@ pub async fn complete_callback(
     let mut form = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", code.to_string()),
-        ("client_id", provider.client_id.to_string()),
-        ("client_secret", provider.client_secret.to_string()),
     ];
     if let Some(r) = redirect_uri.clone() {
         form.push(("redirect_uri", r));
     }
     let resp = http
         .post(&discovery.token_endpoint)
+        // client_secret_basic, which OIDC Core makes the default when the client
+        // registration does not say otherwise. Sending the pair as form fields
+        // (client_secret_post) is what TARA rejects with 401 invalid_client.
+        .basic_auth(&*provider.client_id, Some(&*provider.client_secret))
         .form(&form)
         .send()
         .await
@@ -199,9 +201,20 @@ pub async fn complete_callback(
             }
         })?;
     if !resp.status().is_success() {
+        // Carry the provider's error body. OAuth2 error responses name the actual problem
+        // (invalid_client, invalid_grant, ...); dropping it leaves a bare 401 that cannot
+        // be diagnosed without reproducing the request by hand. Bounded, and the body of a
+        // failed token request holds no token material.
+        let status = resp.status();
+        let body: String = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(512)
+            .collect();
         return Err(TimError::BadGateway(format!(
-            "token exchange returned {}",
-            resp.status()
+            "token exchange returned {status}: {body}"
         )));
     }
     let tokens: TokenResponse = resp
