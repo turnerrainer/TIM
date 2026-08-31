@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1-alpha] - 2026-08-31
+
+Two OAuth2/OIDC defects, both surfaced against TARA
+(`tara-test.ria.ee`). Thanks to Ermo Mägi for the diagnosis
+against the live endpoint.
+
+### Fixed
+
+- `src/oauth2/flow.rs` — token exchange now authenticates via HTTP
+  Basic (`client_secret_basic`) instead of posting `client_id` /
+  `client_secret` as form fields (`client_secret_post`). OIDC Core
+  §9 makes Basic the default when the client registration is
+  silent, and TARA's registration is silent — it rejects
+  `client_secret_post` with `401 invalid_client`, which surfaced
+  in TIM as a bare 502 and blocked every TARA login. Providers
+  that accept both methods (Google, Auth0, Okta, Microsoft, Apple)
+  keep working; providers that only accept `client_secret_post`
+  are not currently supported (no user has one).
+- `src/oauth2/idtoken.rs` — claim mappings now walk dot-separated
+  paths into nested JSON objects via `resolve_claim_path`. TARA
+  carries `given_name` and `family_name` only under
+  `profile_attributes`, and the previous flat lookup returned
+  `None` for any dotted mapping, silently producing sessions with
+  empty names. A name without a dot is still a plain top-level
+  lookup (behaviour unchanged); a dotted path that does not exist
+  yields `None` and does not fall back to a top-level claim with
+  the same trailing segment.
+- `src/oauth2/flow.rs` — the `BadGateway` message from a failed
+  token exchange now includes the upstream response body (bounded
+  to 512 characters). OAuth2 error responses name the actual
+  problem (`invalid_client`, `invalid_grant`, ...); dropping it
+  left operators with a bare status code and no way to diagnose
+  without reproducing the request by hand.
+
+### Testing
+
+- Regression tests cover: token endpoint receives Basic auth with
+  no client credentials in the form body; upstream 401 surfaces as
+  502 without panicking on `resp.text()`; dotted mapping
+  `profile_attributes.given_name` resolves the nested value
+  end-to-end; a dotted-path miss does not fall back to a top-level
+  claim; and a `profile_from_claims` seam test pinning the
+  `resolve_claim_path` dispatch. All would have caught the
+  originals; verified by reverting each fix and re-running.
+
+### Container images
+
+Users pulling `docker.io/turnerrainer/tim:alpha` or
+`ghcr.io/turnerrainer/tim:alpha` get this version automatically.
+Pinned users should switch from `:0.2.0-alpha.2` to
+`:0.2.1-alpha`.
+
 ## [0.2.0-alpha.2] - 2026-08-05
 
 CI-only fix. Same runtime behaviour as `0.2.0-alpha.1`.
@@ -328,7 +380,8 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...HEAD
+[0.2.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...v0.2.1-alpha
 [0.2.0-alpha.2]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/turnerrainer/TIM/compare/v0.1.0-alpha.1...v0.2.0-alpha.1
 [0.1.0-alpha.1]: https://github.com/turnerrainer/TIM/releases/tag/v0.1.0-alpha.1
