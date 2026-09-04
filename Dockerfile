@@ -11,7 +11,7 @@ COPY src ./src
 COPY migrations ./migrations
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM debian:13.6-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
