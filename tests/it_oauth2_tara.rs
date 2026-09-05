@@ -90,6 +90,7 @@ async fn setup_tara_with_mappings(
         },
         allowed_redirect_uris: vec!["https://tim.example.com/auth/callback/tara".into()],
         allow_http_discovery: true,
+        jwks_uri: None,
     };
     for (canonical, provider_key) in mappings {
         provider

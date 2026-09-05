@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that mandate PKCE (some TARA/Google/Microsoft clients) and
   protects the authorization code against on-path interception on
   registrations that permit non-PKCE.
+- `oauth2.providers.<id>.jwks_uri: Option<String>` — pin the JWKS
+  URI expected in the discovery document. When set, TIM refuses
+  discovery whose `jwks_uri` differs, closing the empty-JWKS DoS
+  path against a MITM'd discovery response. Default: unset (no
+  pin), preserving existing behaviour.
 
 ### Changed
 
@@ -43,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running against a non-TLS mock IdP for dev must set
   `oauth2.providers.<id>.allow_http_discovery: true`. Closes MITM
   substitution of the JWKS URI on the discovery fetch.
+- `src/security/session_auth.rs` — the legacy `?session_id=` query
+  transport now emits WARN (was DEBUG). Operators grepping their
+  logs can identify remaining callers before removing the fallback.
+  Payload/behaviour otherwise unchanged.
 
 ### Fixed
 

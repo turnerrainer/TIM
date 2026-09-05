@@ -374,6 +374,7 @@ mod tests {
                 token_validation: TokenValidationConfig::default(),
                 allowed_redirect_uris: vec![],
                 allow_http_discovery: false,
+                jwks_uri: None,
             },
         };
         let claims = IdTokenClaims {

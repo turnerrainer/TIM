@@ -146,6 +146,14 @@ pub struct ProviderConfig {
     /// non-TLS mock IdP.
     #[serde(default)]
     pub allow_http_discovery: bool,
+    /// Pin the JWKS URI expected in the discovery document. When set,
+    /// discovery whose `jwks_uri` differs from this value is refused.
+    /// Prevents a MITM'd discovery response from redirecting JWKS
+    /// fetches to an attacker-controlled endpoint (signature still
+    /// fails for keys the attacker doesn't own, but DoS-by-empty-JWKS
+    /// is trivial).
+    #[serde(default)]
+    pub jwks_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
