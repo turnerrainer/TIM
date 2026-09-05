@@ -47,10 +47,10 @@ async fn sweep_oauth_state(pool: &PgPool, max_age_seconds: u64) -> sqlx::Result<
     let res = sqlx::query(
         r#"
         DELETE FROM auth.oauth_state
-              WHERE created_at < now() - ($1::text || ' seconds')::interval
+              WHERE created_at < now() - make_interval(secs => $1::int)
         "#,
     )
-    .bind(max_age_seconds.to_string())
+    .bind(max_age_seconds as i32)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())

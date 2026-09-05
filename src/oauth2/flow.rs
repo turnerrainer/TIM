@@ -166,22 +166,24 @@ pub async fn complete_callback(
         .get(provider_id)
         .ok_or_else(|| TimError::NotFound(format!("unknown provider {provider_id}")))?;
 
-    // Consume state (single-use). Fix finding 11: reject rows older
-    // than the configured max age via the WHERE clause. RFC 7636:
-    // return the persisted PKCE verifier so it can be replayed on the
-    // token endpoint.
+    // Consume state (single-use). Postgres guarantees the DELETE ...
+    // RETURNING is atomic under READ COMMITTED — two callbacks with
+    // the same state cannot both receive a row. The age guard in the
+    // WHERE clause also closes the sweeper race: an expired-but-not-
+    // yet-swept row cannot be consumed. RFC 7636: return the persisted
+    // PKCE verifier so it can be replayed on the token endpoint.
     let row: Option<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"
         DELETE FROM auth.oauth_state
               WHERE state = $1
                 AND provider_id = $2
-                AND created_at > now() - ($3::text || ' seconds')::interval
+                AND created_at > now() - make_interval(secs => $3::int)
           RETURNING nonce, provider_id, redirect_uri, pkce_verifier
         "#,
     )
     .bind(state)
     .bind(provider_id)
-    .bind(state_max_age_seconds.to_string())
+    .bind(state_max_age_seconds as i32)
     .fetch_optional(db)
     .await?;
     let (nonce, _provider_confirm, redirect_uri, pkce_verifier) = match row {
