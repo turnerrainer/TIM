@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string. New `JwtSigner::verify_raw` exposes the typed error so
   classifier logic doesn't lose the kind through the `TimError`
   wrapper.
+- `src/oauth2/session/postgres.rs` — `PostgresStore::get` now
+  filters expired rows in the SELECT (`AND expires_at > now()`)
+  instead of doing a check-then-DELETE in Rust. Removes the
+  two-writer race where concurrent gets on an expiring session
+  both saw the row as expired and raced the DELETE (one won, the
+  other errored — visible as inconsistent 404/401 pairs). Expired
+  rows are now removed only by `sweep_expired`, which is already
+  scheduled by the state sweeper.
 
 ## [0.2.1-alpha] - 2026-08-31
 

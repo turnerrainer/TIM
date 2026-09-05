@@ -69,6 +69,13 @@ impl SessionStore for PostgresStore {
     }
 
     async fn get(&self, id: &str) -> Result<Option<Session>> {
+        // Fold the expiry check into the SELECT so `get()` is a single
+        // query with no check-then-act race: a session that is expired
+        // at query time returns `None` and expired rows are reaped by
+        // the background sweeper (`sweep_expired`). Prior code did the
+        // check in Rust and then issued an opportunistic DELETE — two
+        // concurrent GETs could observe the same row as expired and
+        // race the DELETE, producing inconsistent 404/401 pairs.
         type Row = (
             String,
             String,
@@ -83,6 +90,7 @@ impl SessionStore for PostgresStore {
             SELECT id, provider_id, user_id, created_at, last_activity, expires_at, profile_encrypted
               FROM auth.session
              WHERE id = $1
+               AND expires_at > now()
             "#,
         )
         .bind(id)
@@ -92,15 +100,6 @@ impl SessionStore for PostgresStore {
         else {
             return Ok(None);
         };
-        let now = Utc::now();
-        if expires_at <= now {
-            // Opportunistic cleanup — matches MemoryStore behavior.
-            let _ = sqlx::query("DELETE FROM auth.session WHERE id = $1")
-                .bind(&id)
-                .execute(&self.pool)
-                .await;
-            return Ok(None);
-        }
         let profile = self.open_profile(&sealed)?;
         Ok(Some(Session {
             id,

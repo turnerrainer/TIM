@@ -9,6 +9,7 @@ pub mod memory;
 pub mod postgres;
 mod store;
 
+pub use crypto::SessionCipher;
 pub use memory::MemoryStore;
 pub use postgres::PostgresStore;
 pub use store::{Session, SessionStore, SharedSessionStore};
