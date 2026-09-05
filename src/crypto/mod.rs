@@ -84,6 +84,18 @@ impl JwtSigner {
             .map_err(|e| TimError::Crypto(format!("verify JWT: {e}")))
     }
 
+    /// Like `verify` but returns the raw `jsonwebtoken` error so
+    /// callers can classify via `error.kind()` for stable monitoring
+    /// codes. Wrapping the error into `TimError::Crypto(String)`
+    /// discarded the typed kind and forced string-matching downstream.
+    pub fn verify_raw<C: for<'de> Deserialize<'de>>(
+        &self,
+        token: &str,
+        validation: &Validation,
+    ) -> std::result::Result<TokenData<C>, jsonwebtoken::errors::Error> {
+        decode::<C>(token, &self.inner.decoding, validation)
+    }
+
     /// Peek at the header without verifying — used by introspection
     /// to route by `kid` / algorithm.
     pub fn header_of(token: &str) -> Result<Header> {

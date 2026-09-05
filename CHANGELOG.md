@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `https://hstspreload.org`. First-request MITM against
     non-preloaded HSTS deployments leaks bearer tokens in the clear.
 
+### Fixed
+
+- `src/jwt/service.rs::validate` — reason-code classification now
+  matches on `jsonwebtoken::errors::ErrorKind` variants instead of
+  `format!("{e}").contains("expired")`. The prior pattern would have
+  silently reclassified every non-expiry error as
+  `signature_mismatch` on a `jsonwebtoken` text-format change,
+  hiding real bugs and breaking monitoring keyed on the reason
+  string. New `JwtSigner::verify_raw` exposes the typed error so
+  classifier logic doesn't lose the kind through the `TimError`
+  wrapper.
+
 ## [0.2.1-alpha] - 2026-08-31
 
 Two OAuth2/OIDC defects, both surfaced against TARA
