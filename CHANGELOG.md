@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discovery whose `jwks_uri` differs, closing the empty-JWKS DoS
   path against a MITM'd discovery response. Default: unset (no
   pin), preserving existing behaviour.
+- `POST /introspect` now supports optional Basic-auth client
+  authentication per RFC 7662 §2.1. Configured via a new
+  `introspection` section:
+  - `introspection.required_client_auth: bool` (default false for
+    backwards compatibility)
+  - `introspection.clients: [{ client_id, client_secret_env }]`
+  Secrets are compared constant-time (`subtle::ConstantTimeEq`).
+  When required, missing/wrong credentials → 401; the endpoint no
+  longer accepts every request against the denylist SELECT.
+- New module `src/security/introspect_auth.rs` +
+  `IntrospectionGate` boot resolver. Fails startup if any referenced
+  `client_secret_env` is unset when the gate is required.
 
 ### Changed
 

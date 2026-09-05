@@ -91,6 +91,7 @@ async fn setup_with_provider(server_url: &str) -> Option<axum::Router> {
         providers,
         sessions,
         admin,
+        introspect_gate: tim::security::IntrospectionGate::default(),
     };
     Some(build_router(state, &cfg))
 }

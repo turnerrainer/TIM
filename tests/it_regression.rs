@@ -68,6 +68,7 @@ async fn base_router() -> Option<(axum::Router, sqlx::PgPool, Arc<JwtService>)> 
         providers,
         sessions,
         admin,
+        introspect_gate: tim::security::IntrospectionGate::default(),
     };
     Some((build_router(state, &cfg), pool, jwt))
 }
