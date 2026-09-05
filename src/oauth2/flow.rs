@@ -79,7 +79,10 @@ pub async fn build_login_url(
 
     let discovery = registry
         .discovery
-        .fetch(&provider.config.discovery_url)
+        .fetch_with(
+            &provider.config.discovery_url,
+            provider.config.allow_http_discovery,
+        )
         .await?;
     let state = random_hex(32);
     let nonce = random_hex(32);
@@ -197,7 +200,10 @@ pub async fn complete_callback(
 
     let discovery = registry
         .discovery
-        .fetch(&provider.config.discovery_url)
+        .fetch_with(
+            &provider.config.discovery_url,
+            provider.config.allow_http_discovery,
+        )
         .await?;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))

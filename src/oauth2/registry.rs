@@ -38,6 +38,16 @@ impl ProviderRegistry {
         // JWKS cache; pick the max, floor 60 s.
         let mut jwks_ttl = 60u64;
         for (id, pc) in &cfg.providers {
+            // M1: refuse to start with a non-https discovery_url unless
+            // the operator has explicitly opted in on this provider.
+            if !pc.discovery_url.starts_with("https://") && !pc.allow_http_discovery {
+                return Err(TimError::Config(format!(
+                    "provider {id}: discovery_url `{}` is not https://. \
+                     Set `allow_http_discovery: true` on this provider to \
+                     opt in for dev.",
+                    pc.discovery_url
+                )));
+            }
             let client_id = std::env::var(&pc.client_id_env).map_err(|_| {
                 TimError::Config(format!(
                     "provider {id}: env var {} not set",

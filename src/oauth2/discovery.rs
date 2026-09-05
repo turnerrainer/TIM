@@ -30,7 +30,16 @@ impl Discovery {
     /// failure aborts the login flow before TIM constructs an
     /// authorization URL against a provider it can't complete a code
     /// exchange with.
+    ///
+    /// `allow_http` gates whether non-`https://` endpoints inside the
+    /// discovery document are accepted. Default (via `validate`) is
+    /// `false` — the operator must opt in per provider by setting
+    /// `allow_http_discovery: true`.
     pub fn validate(&self) -> Result<()> {
+        self.validate_with(false)
+    }
+
+    pub fn validate_with(&self, allow_http: bool) -> Result<()> {
         for (name, val) in [
             ("issuer", &self.issuer),
             ("authorization_endpoint", &self.authorization_endpoint),
@@ -49,10 +58,15 @@ impl Discovery {
             ("jwks_uri", &self.jwks_uri),
         ] {
             if !val.starts_with("https://") {
-                // Warn rather than fail — some test providers (and
-                // the JVM 2.0 default `http://localhost` example) use
-                // http. Fail-closed would break dev flows.
-                warn!(field = name, url = %val, "discovery endpoint is not https");
+                if !allow_http {
+                    return Err(TimError::BadGateway(format!(
+                        "discovery: `{name}` is not https://. Set \
+                         `allow_http_discovery: true` on this provider \
+                         to opt in for dev."
+                    )));
+                }
+                warn!(field = name, url = %val,
+                    "discovery endpoint is not https (allow_http_discovery=true)");
             }
         }
         if !self.grant_types_supported.is_empty()
@@ -103,7 +117,14 @@ impl DiscoveryCache {
     /// Retry-with-backoff (finding 08). Backoff: 500ms, 1s, 2s,
     /// capped at ~10s total. Only network/5xx errors trigger a
     /// retry — 4xx responses fail fast.
+    ///
+    /// `allow_http` opts the caller into plain-HTTP endpoints inside
+    /// the discovery document (M1: fail-closed by default).
     pub async fn fetch(&self, discovery_url: &str) -> Result<Discovery> {
+        self.fetch_with(discovery_url, false).await
+    }
+
+    pub async fn fetch_with(&self, discovery_url: &str, allow_http: bool) -> Result<Discovery> {
         if let Some(cached) = self.cache.get(discovery_url).await {
             return Ok(cached);
         }
@@ -112,7 +133,7 @@ impl DiscoveryCache {
         for attempt in 0..=self.max_retries {
             match self.fetch_once(discovery_url).await {
                 Ok(doc) => {
-                    doc.validate()?;
+                    doc.validate_with(allow_http)?;
                     self.cache
                         .insert(discovery_url.to_string(), doc.clone())
                         .await;
@@ -218,5 +239,20 @@ mod tests {
         d.grant_types_supported.clear();
         d.response_types_supported.clear();
         assert!(d.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_http_endpoint_by_default() {
+        let mut d = doc();
+        d.authorization_endpoint = "http://idp/authorize".into();
+        let err = d.validate().unwrap_err();
+        assert!(matches!(err, TimError::BadGateway(_)));
+    }
+
+    #[test]
+    fn validate_accepts_http_endpoint_when_opted_in() {
+        let mut d = doc();
+        d.authorization_endpoint = "http://idp/authorize".into();
+        assert!(d.validate_with(true).is_ok());
     }
 }

@@ -162,8 +162,9 @@ async fn discovery_retries_on_5xx_then_succeeds() {
         .create_async()
         .await;
     let cache = DiscoveryCache::new(60);
+    // Mockito is plain-HTTP; opt in to skip the M1 HTTPS check.
     let out = cache
-        .fetch(&format!("{base}/.well-known/openid-configuration"))
+        .fetch_with(&format!("{base}/.well-known/openid-configuration"), true)
         .await;
     assert!(out.is_ok(), "expected retry-then-succeed; got {out:?}");
 }

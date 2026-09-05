@@ -138,6 +138,14 @@ pub struct ProviderConfig {
     /// caller-supplied value is rejected.
     #[serde(default)]
     pub allowed_redirect_uris: Vec<String>,
+    /// Allow `discovery_url` and endpoints inside the discovery
+    /// document to use plain `http://`. Default false — startup
+    /// refuses so an operator who typo'd `http` (or an MITM on the
+    /// discovery fetch) cannot silently substitute the JWKS URI and
+    /// forge ID tokens. Flip to true only for local dev against a
+    /// non-TLS mock IdP.
+    #[serde(default)]
+    pub allow_http_discovery: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
