@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     TIM names both facts in one line and points at
     `https://hstspreload.org`. First-request MITM against
     non-preloaded HSTS deployments leaks bearer tokens in the clear.
+- `src/oauth2/flow.rs` — OAuth2 authorization requests now send a
+  per-request `code_challenge` (SHA-256 base64url-nopad) plus
+  `code_challenge_method=S256` per RFC 7636 (PKCE). The 32-byte
+  verifier is persisted alongside `state` in `auth.oauth_state`
+  and replayed on the token endpoint. Unblocks IdP registrations
+  that mandate PKCE (some TARA/Google/Microsoft clients) and
+  protects the authorization code against on-path interception on
+  registrations that permit non-PKCE.
 
 ### Fixed
 

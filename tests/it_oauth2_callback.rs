@@ -403,7 +403,7 @@ async fn token_exchange_uses_http_basic_and_omits_credentials_from_form_body() {
         .mock("POST", "/token")
         .match_header("authorization", expected_basic.as_str())
         .match_body(mockito::Matcher::Regex(
-            r"^grant_type=authorization_code&code=any-code(?:&redirect_uri=[^&]+)?$".into(),
+            r"^grant_type=authorization_code&code=any-code(?:&redirect_uri=[^&]+)?(?:&code_verifier=[^&]+)?$".into(),
         ))
         .with_status(200)
         .with_header("content-type", "application/json")

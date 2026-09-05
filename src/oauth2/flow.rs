@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use chrono::{Duration, Utc};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use url::Url;
 
@@ -80,17 +83,25 @@ pub async fn build_login_url(
         .await?;
     let state = random_hex(32);
     let nonce = random_hex(32);
+    // RFC 7636 PKCE: generate a per-request verifier + S256 challenge.
+    // Persist the verifier keyed by `state` so the callback can replay
+    // it on the token endpoint. Providers that mandate PKCE (some
+    // TARA/Google/Microsoft registrations) reject requests without a
+    // challenge; providers that permit non-PKCE gain interception
+    // resistance for the authorization code.
+    let (pkce_verifier, pkce_challenge) = generate_pkce();
 
     sqlx::query(
         r#"
-        INSERT INTO auth.oauth_state (state, provider_id, nonce, redirect_uri)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO auth.oauth_state (state, provider_id, nonce, redirect_uri, pkce_verifier)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
     )
     .bind(&state)
     .bind(provider_id)
     .bind(&nonce)
     .bind(redirect_uri)
+    .bind(&pkce_verifier)
     .execute(db)
     .await?;
 
@@ -104,6 +115,8 @@ pub async fn build_login_url(
         q.append_pair("scope", &provider.config.scopes.join(" "));
         q.append_pair("state", &state);
         q.append_pair("nonce", &nonce);
+        q.append_pair("code_challenge", &pkce_challenge);
+        q.append_pair("code_challenge_method", "S256");
     }
 
     Ok(AuthUrl {
@@ -111,6 +124,16 @@ pub async fn build_login_url(
         provider: provider_id.to_string(),
         state,
     })
+}
+
+/// RFC 7636 §4.1/§4.2: 32-byte random → base64url-no-pad verifier
+/// (43 chars) and its SHA-256 base64url-no-pad challenge.
+fn generate_pkce() -> (String, String) {
+    let mut raw = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut raw);
+    let verifier = URL_SAFE_NO_PAD.encode(raw);
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    (verifier, challenge)
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,14 +167,16 @@ pub async fn complete_callback(
         .ok_or_else(|| TimError::NotFound(format!("unknown provider {provider_id}")))?;
 
     // Consume state (single-use). Fix finding 11: reject rows older
-    // than the configured max age via the WHERE clause.
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
+    // than the configured max age via the WHERE clause. RFC 7636:
+    // return the persisted PKCE verifier so it can be replayed on the
+    // token endpoint.
+    let row: Option<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"
         DELETE FROM auth.oauth_state
               WHERE state = $1
                 AND provider_id = $2
                 AND created_at > now() - ($3::text || ' seconds')::interval
-          RETURNING nonce, provider_id, redirect_uri
+          RETURNING nonce, provider_id, redirect_uri, pkce_verifier
         "#,
     )
     .bind(state)
@@ -159,7 +184,7 @@ pub async fn complete_callback(
     .bind(state_max_age_seconds.to_string())
     .fetch_optional(db)
     .await?;
-    let (nonce, _provider_confirm, redirect_uri) = match row {
+    let (nonce, _provider_confirm, redirect_uri, pkce_verifier) = match row {
         Some(r) => r,
         None => {
             return Err(TimError::Unprocessable(
@@ -183,6 +208,14 @@ pub async fn complete_callback(
     ];
     if let Some(r) = redirect_uri.clone() {
         form.push(("redirect_uri", r));
+    }
+    // RFC 7636 §4.5: replay the stored verifier. Rows written before
+    // this version's migration may lack the value; skip in that case
+    // so long-lived state rows don't break in-flight logins.
+    if let Some(v) = pkce_verifier.clone() {
+        if !v.is_empty() {
+            form.push(("code_verifier", v));
+        }
     }
     let resp = http
         .post(&discovery.token_endpoint)
@@ -318,5 +351,26 @@ mod tests {
     fn resolve_errors_when_no_source_available() {
         let err = resolve_redirect_uri("google", &[], "", None).unwrap_err();
         assert!(matches!(err, TimError::BadRequest(_)));
+    }
+
+    #[test]
+    fn pkce_challenge_is_sha256_of_verifier() {
+        let (verifier, challenge) = generate_pkce();
+        // RFC 7636 §4.1: 43..=128 URL-safe chars.
+        assert_eq!(verifier.len(), 43);
+        assert!(verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')));
+        // Challenge = base64url-nopad(SHA-256(verifier)).
+        let expected = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+        assert_eq!(challenge, expected);
+        assert_eq!(challenge.len(), 43); // SHA-256 → 32 bytes → 43 chars nopad
+    }
+
+    #[test]
+    fn pkce_generates_unique_verifiers() {
+        let (v1, _) = generate_pkce();
+        let (v2, _) = generate_pkce();
+        assert_ne!(v1, v2, "two calls must not collide");
     }
 }
