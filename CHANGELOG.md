@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protects the authorization code against on-path interception on
   registrations that permit non-PKCE.
 
+### Changed
+
+- `src/oauth2/flow.rs`, `src/oauth2/state_sweeper.rs` — `auth.oauth_state`
+  interval expressions rewritten as
+  `now() - make_interval(secs => $N::int)` instead of the string-concat-
+  then-cast form. Semantics identical (bind is still parameterised —
+  no injection path either way); the new form reads what it does.
+
 ### Fixed
 
 - `src/jwt/service.rs::validate` — reason-code classification now
@@ -48,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other errored — visible as inconsistent 404/401 pairs). Expired
   rows are now removed only by `sweep_expired`, which is already
   scheduled by the state sweeper.
+
+### Testing
+
+- New `tests/it_oauth_state_race.rs` pins the atomic single-use
+  contract on `DELETE ... RETURNING`: 32 concurrent callbacks with
+  the same `state` value produce exactly one winner. Also asserts
+  that an aged-past-cap row cannot be consumed even before the
+  sweeper reaches it (closes the sweeper vs. consumer race).
 
 ## [0.2.1-alpha] - 2026-08-31
 
