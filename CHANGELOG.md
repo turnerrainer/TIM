@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-09-06
+
+Post-audit release. Nine PRs (h2ck.me v1 audit findings + one Snyk
+base-image bump) landed on `dev` between 2026-09-04 and 2026-09-06
+as one coordinated batch. Every finding was independently reviewed
+by h2ck.me and closed with verdict ✅ pass.
+
+### Upgrading from 0.2.x
+
+**One breaking change.** OIDC discovery is fail-closed on plain
+HTTP by default (see `### Changed` below). To find and fix
+affected configs before upgrading:
+
+```bash
+# Any plain-http discovery_url in your tim.yaml:
+grep -nE 'discovery_url:\s*http://' tim.yaml
+# Anywhere in a mounted config directory:
+grep -rnE 'discovery_url:\s*http://' /path/to/config/
+```
+
+If a hit is intentional (dev against a non-TLS mock IdP), set
+`oauth2.providers.<id>.allow_http_discovery: true` alongside the
+plain-http URL. Otherwise, switch to `https://` before upgrading.
+The check also enforces HTTPS on endpoints *inside* the returned
+discovery document — a provider that publishes HTTP endpoints in
+its `.well-known/openid-configuration` will fail login regardless
+of the URL you configured, and needs the same opt-in.
+
+**Two soft behaviour changes worth noting:**
+
+- Legacy `?session_id=<id>` query-string transport now logs at
+  **WARN** (was DEBUG). Log-volume alerting keyed on WARN counts
+  may fire on deployments still using the query transport. Migrate
+  callers to `Authorization: Bearer sess_<id>` or `X-TIM-Session`.
+- JWT validate `reason` field values may differ for previously
+  mis-classified errors (see `### Fixed` on `jwt/service.rs`).
+  Dashboards keyed on the exact `reason` string may need updating.
+
+No schema migration needed. The `pkce_verifier` column used by the
+PKCE work was reserved in `migrations/0001_init.sql` since the
+first alpha; existing databases already have it.
+
 ### Added
 
 - Boot-time diagnostic in `AppConfig::diagnose` now warns loudly on
@@ -466,7 +508,8 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.3.0-alpha...HEAD
+[0.3.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...v0.3.0-alpha
 [0.2.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...v0.2.1-alpha
 [0.2.0-alpha.2]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/turnerrainer/TIM/compare/v0.1.0-alpha.1...v0.2.0-alpha.1
