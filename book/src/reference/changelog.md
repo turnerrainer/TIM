@@ -7,6 +7,186 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-09-06
+
+Post-audit release. Nine PRs (h2ck.me v1 audit findings + one Snyk
+base-image bump) landed on `dev` between 2026-09-04 and 2026-09-06
+as one coordinated batch. Every finding was independently reviewed
+by h2ck.me and closed with verdict ✅ pass.
+
+### Upgrading from 0.2.x
+
+**One breaking change.** OIDC discovery is fail-closed on plain
+HTTP by default (see `### Changed` below). To find and fix
+affected configs before upgrading:
+
+```bash
+# Any plain-http discovery_url in your tim.yaml:
+grep -nE 'discovery_url:\s*http://' tim.yaml
+# Anywhere in a mounted config directory:
+grep -rnE 'discovery_url:\s*http://' /path/to/config/
+```
+
+If a hit is intentional (dev against a non-TLS mock IdP), set
+`oauth2.providers.<id>.allow_http_discovery: true` alongside the
+plain-http URL. Otherwise, switch to `https://` before upgrading.
+The check also enforces HTTPS on endpoints *inside* the returned
+discovery document — a provider that publishes HTTP endpoints in
+its `.well-known/openid-configuration` will fail login regardless
+of the URL you configured, and needs the same opt-in.
+
+**Two soft behaviour changes worth noting:**
+
+- Legacy `?session_id=<id>` query-string transport now logs at
+  **WARN** (was DEBUG). Log-volume alerting keyed on WARN counts
+  may fire on deployments still using the query transport. Migrate
+  callers to `Authorization: Bearer sess_<id>` or `X-TIM-Session`.
+- JWT validate `reason` field values may differ for previously
+  mis-classified errors (see `### Fixed` on `jwt/service.rs`).
+  Dashboards keyed on the exact `reason` string may need updating.
+
+No schema migration needed. The `pkce_verifier` column used by the
+PKCE work was reserved in `migrations/0001_init.sql` since the
+first alpha; existing databases already have it.
+
+### Added
+
+- Boot-time diagnostic in `AppConfig::diagnose` now warns loudly on
+  two long-standing operator footguns:
+  - **CORS wildcard exposes cross-origin reads.** When
+    `security.cors_allowed_origins` contains `"*"`, TIM logs that
+    every unauthenticated read endpoint (`/health`,
+    `/auth/providers`, ...) is now reachable cross-origin.
+  - **HSTS + non-loopback bind without `preload`.** When bind is
+    not loopback and `strict_transport_security` lacks `preload`,
+    TIM names both facts in one line and points at
+    `https://hstspreload.org`. First-request MITM against
+    non-preloaded HSTS deployments leaks bearer tokens in the clear.
+- `src/oauth2/flow.rs` — OAuth2 authorization requests now send a
+  per-request `code_challenge` (SHA-256 base64url-nopad) plus
+  `code_challenge_method=S256` per RFC 7636 (PKCE). The 32-byte
+  verifier is persisted alongside `state` in `auth.oauth_state`
+  and replayed on the token endpoint. Unblocks IdP registrations
+  that mandate PKCE (some TARA/Google/Microsoft clients) and
+  protects the authorization code against on-path interception on
+  registrations that permit non-PKCE.
+- `oauth2.providers.<id>.jwks_uri: Option<String>` — pin the JWKS
+  URI expected in the discovery document. When set, TIM refuses
+  discovery whose `jwks_uri` differs, closing the empty-JWKS DoS
+  path against a MITM'd discovery response. Default: unset (no
+  pin), preserving existing behaviour.
+- `POST /introspect` now supports optional Basic-auth client
+  authentication per RFC 7662 §2.1. Configured via a new
+  `introspection` section:
+  - `introspection.required_client_auth: bool` (default false for
+    backwards compatibility)
+  - `introspection.clients: [{ client_id, client_secret_env }]`
+  Secrets are compared constant-time (`subtle::ConstantTimeEq`).
+  When required, missing/wrong credentials → 401; the endpoint no
+  longer accepts every request against the denylist SELECT.
+- New module `src/security/introspect_auth.rs` +
+  `IntrospectionGate` boot resolver. Fails startup if any referenced
+  `client_secret_env` is unset when the gate is required.
+
+### Changed
+
+- `src/oauth2/flow.rs`, `src/oauth2/state_sweeper.rs` — `auth.oauth_state`
+  interval expressions rewritten as
+  `now() - make_interval(secs => $N::int)` instead of the string-concat-
+  then-cast form. Semantics identical (bind is still parameterised —
+  no injection path either way); the new form reads what it does.
+- OIDC discovery is now fail-closed on plain HTTP. `provider.
+  discovery_url` and endpoints inside the discovery document
+  (`authorization_endpoint`, `token_endpoint`, `jwks_uri`) must all
+  use `https://` or startup / login refuses. Operators intentionally
+  running against a non-TLS mock IdP for dev must set
+  `oauth2.providers.<id>.allow_http_discovery: true`. Closes MITM
+  substitution of the JWKS URI on the discovery fetch.
+- `src/security/session_auth.rs` — the legacy `?session_id=` query
+  transport now emits WARN (was DEBUG). Operators grepping their
+  logs can identify remaining callers before removing the fallback.
+  Payload/behaviour otherwise unchanged.
+
+### Fixed
+
+- `src/jwt/service.rs::validate` — reason-code classification now
+  matches on `jsonwebtoken::errors::ErrorKind` variants instead of
+  `format!("{e}").contains("expired")`. The prior pattern would have
+  silently reclassified every non-expiry error as
+  `signature_mismatch` on a `jsonwebtoken` text-format change,
+  hiding real bugs and breaking monitoring keyed on the reason
+  string. New `JwtSigner::verify_raw` exposes the typed error so
+  classifier logic doesn't lose the kind through the `TimError`
+  wrapper.
+- `src/oauth2/session/postgres.rs` — `PostgresStore::get` now
+  filters expired rows in the SELECT (`AND expires_at > now()`)
+  instead of doing a check-then-DELETE in Rust. Removes the
+  two-writer race where concurrent gets on an expiring session
+  both saw the row as expired and raced the DELETE (one won, the
+  other errored — visible as inconsistent 404/401 pairs). Expired
+  rows are now removed only by `sweep_expired`, which is already
+  scheduled by the state sweeper.
+
+### Testing
+
+- New `tests/it_oauth_state_race.rs` pins the atomic single-use
+  contract on `DELETE ... RETURNING`: 32 concurrent callbacks with
+  the same `state` value produce exactly one winner. Also asserts
+  that an aged-past-cap row cannot be consumed even before the
+  sweeper reaches it (closes the sweeper vs. consumer race).
+
+## [0.2.1-alpha] - 2026-08-31
+
+Two OAuth2/OIDC defects, both surfaced against TARA
+(`tara-test.ria.ee`). Thanks to Ermo Mägi for the diagnosis
+against the live endpoint.
+
+### Fixed
+
+- `src/oauth2/flow.rs` — token exchange now authenticates via HTTP
+  Basic (`client_secret_basic`) instead of posting `client_id` /
+  `client_secret` as form fields (`client_secret_post`). OIDC Core
+  §9 makes Basic the default when the client registration is
+  silent, and TARA's registration is silent — it rejects
+  `client_secret_post` with `401 invalid_client`, which surfaced
+  in TIM as a bare 502 and blocked every TARA login. Providers
+  that accept both methods (Google, Auth0, Okta, Microsoft, Apple)
+  keep working; providers that only accept `client_secret_post`
+  are not currently supported (no user has one).
+- `src/oauth2/idtoken.rs` — claim mappings now walk dot-separated
+  paths into nested JSON objects via `resolve_claim_path`. TARA
+  carries `given_name` and `family_name` only under
+  `profile_attributes`, and the previous flat lookup returned
+  `None` for any dotted mapping, silently producing sessions with
+  empty names. A name without a dot is still a plain top-level
+  lookup (behaviour unchanged); a dotted path that does not exist
+  yields `None` and does not fall back to a top-level claim with
+  the same trailing segment.
+- `src/oauth2/flow.rs` — the `BadGateway` message from a failed
+  token exchange now includes the upstream response body (bounded
+  to 512 characters). OAuth2 error responses name the actual
+  problem (`invalid_client`, `invalid_grant`, ...); dropping it
+  left operators with a bare status code and no way to diagnose
+  without reproducing the request by hand.
+
+### Testing
+
+- Regression tests cover: token endpoint receives Basic auth with
+  no client credentials in the form body; upstream 401 surfaces as
+  502 without panicking on `resp.text()`; dotted mapping
+  `profile_attributes.given_name` resolves the nested value
+  end-to-end; a dotted-path miss does not fall back to a top-level
+  claim; and a `profile_from_claims` seam test pinning the
+  `resolve_claim_path` dispatch. All would have caught the
+  originals; verified by reverting each fix and re-running.
+
+### Container images
+
+Users pulling `docker.io/turnerrainer/tim:alpha` or
+`ghcr.io/turnerrainer/tim:alpha` get this version automatically.
+Pinned users should switch from `:0.2.0-alpha.2` to
+`:0.2.1-alpha`.
+
 ## [0.2.0-alpha.2] - 2026-08-05
 
 CI-only fix. Same runtime behaviour as `0.2.0-alpha.1`.
@@ -328,7 +508,9 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.3.0-alpha...HEAD
+[0.3.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...v0.3.0-alpha
+[0.2.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...v0.2.1-alpha
 [0.2.0-alpha.2]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...v0.2.0-alpha.2
 [0.2.0-alpha.1]: https://github.com/turnerrainer/TIM/compare/v0.1.0-alpha.1...v0.2.0-alpha.1
 [0.1.0-alpha.1]: https://github.com/turnerrainer/TIM/releases/tag/v0.1.0-alpha.1

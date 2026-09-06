@@ -6,9 +6,26 @@ Token Identity Manager — Rust reimplementation of
 multi-provider authentication + RFC 7662 token introspection, backed
 by PostgreSQL.
 
-**Version:** 0.2.0-alpha.2 · **License:** Apache-2.0
+**Version:** 0.3.0-alpha · **License:** Apache-2.0
 · **Docs:** [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
 · **Images:** `docker.io/turnerrainer/tim:alpha`, `ghcr.io/turnerrainer/tim:alpha`
+
+## Upgrading from 0.2.x
+
+**Breaking:** OIDC discovery is fail-closed on plain HTTP by default
+in 0.3.0-alpha. Any provider whose `discovery_url` uses `http://`,
+or whose discovery document returns HTTP endpoints, will now refuse
+to start / login. Find affected configs before upgrading:
+
+```bash
+grep -rnE 'discovery_url:\s*http://' path/to/config/
+```
+
+Intentional dev-against-mock setups: set
+`oauth2.providers.<id>.allow_http_discovery: true`. Otherwise use
+`https://`. Two soft behaviour changes and the full upgrade note
+live in [`CHANGELOG.md`](./CHANGELOG.md) under the 0.3.0-alpha
+"Upgrading from 0.2.x" section.
 
 ## One-command demo
 
