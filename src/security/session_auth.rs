@@ -66,12 +66,22 @@ where
                 }
             }
         }
-        // Legacy fallback.
+        // Legacy fallback. Elevated to WARN (was DEBUG) so operators
+        // grepping their logs can identify callers still on the
+        // query-string transport before removing it. Query strings
+        // land in access logs, proxy logs, browser history, and
+        // Referer headers — the header/Bearer forms don't.
         if let Ok(Query(q)) = Query::<SessionQuery>::try_from_uri(&parts.uri) {
             if let Some(id) = q.session_id {
                 let id = id.trim().to_string();
                 if !id.is_empty() {
-                    tracing::debug!("session_id supplied via query string (legacy)");
+                    tracing::warn!(
+                        target: "tim::compat",
+                        via_query = true,
+                        "session_id supplied via query string (legacy) — \
+                         migrate caller to X-TIM-Session header or \
+                         Authorization: Bearer sess_<id>"
+                    );
                     return Ok(SessionAuth {
                         session_id: id,
                         via_query: true,

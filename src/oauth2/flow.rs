@@ -10,9 +10,10 @@ use sqlx::PgPool;
 use url::Url;
 
 use crate::error::{Result, TimError};
+use crate::oauth2::discovery::Discovery;
 use crate::oauth2::idtoken;
 use crate::oauth2::jwks::JwksCache;
-use crate::oauth2::registry::ProviderRegistry;
+use crate::oauth2::registry::{Provider, ProviderRegistry};
 use crate::oauth2::session::{Session, SharedSessionStore};
 
 /// Response returned by `GET /auth/login/{provider_id}`.
@@ -84,6 +85,7 @@ pub async fn build_login_url(
             provider.config.allow_http_discovery,
         )
         .await?;
+    enforce_jwks_pin(provider, &discovery)?;
     let state = random_hex(32);
     let nonce = random_hex(32);
     // RFC 7636 PKCE: generate a per-request verifier + S256 challenge.
@@ -205,6 +207,7 @@ pub async fn complete_callback(
             provider.config.allow_http_discovery,
         )
         .await?;
+    enforce_jwks_pin(provider, &discovery)?;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -308,6 +311,24 @@ pub async fn complete_callback(
     })
 }
 
+/// L3: refuse discovery whose `jwks_uri` differs from the operator's
+/// pinned value. Signature verification would already fail closed for
+/// keys the attacker doesn't own, but empty-JWKS is a trivial DoS
+/// (no login can succeed) if the operator pinned the expected URI
+/// and the pin doesn't match.
+fn enforce_jwks_pin(provider: &Provider, discovery: &Discovery) -> Result<()> {
+    let Some(pinned) = provider.config.jwks_uri.as_ref() else {
+        return Ok(());
+    };
+    if pinned != &discovery.jwks_uri {
+        return Err(TimError::Unprocessable(format!(
+            "provider {}: discovery jwks_uri `{}` does not match pinned value `{pinned}`",
+            provider.id, discovery.jwks_uri
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
     rand::thread_rng().fill_bytes(&mut buf);
@@ -380,5 +401,57 @@ mod tests {
         let (v1, _) = generate_pkce();
         let (v2, _) = generate_pkce();
         assert_ne!(v1, v2, "two calls must not collide");
+    }
+
+    fn provider_with_pin(pin: Option<&str>) -> Provider {
+        use crate::config::{ProviderConfig, TokenValidationConfig};
+        Provider {
+            id: "p".into(),
+            client_id: "cid".into(),
+            client_secret: "cs".into(),
+            config: ProviderConfig {
+                name: "P".into(),
+                discovery_url: "https://idp/.well-known".into(),
+                client_id_env: String::new(),
+                client_secret_env: String::new(),
+                scopes: vec![],
+                claim_mappings: Default::default(),
+                token_validation: TokenValidationConfig::default(),
+                allowed_redirect_uris: vec![],
+                allow_http_discovery: false,
+                jwks_uri: pin.map(str::to_string),
+            },
+        }
+    }
+
+    fn disc(jwks: &str) -> Discovery {
+        Discovery {
+            issuer: "https://idp".into(),
+            authorization_endpoint: "https://idp/authorize".into(),
+            token_endpoint: "https://idp/token".into(),
+            userinfo_endpoint: None,
+            jwks_uri: jwks.into(),
+            grant_types_supported: vec![],
+            response_types_supported: vec![],
+        }
+    }
+
+    #[test]
+    fn jwks_pin_none_is_a_no_op() {
+        let p = provider_with_pin(None);
+        assert!(enforce_jwks_pin(&p, &disc("https://anything/jwks")).is_ok());
+    }
+
+    #[test]
+    fn jwks_pin_matches() {
+        let p = provider_with_pin(Some("https://idp/jwks"));
+        assert!(enforce_jwks_pin(&p, &disc("https://idp/jwks")).is_ok());
+    }
+
+    #[test]
+    fn jwks_pin_rejects_mismatch() {
+        let p = provider_with_pin(Some("https://idp/jwks"));
+        let err = enforce_jwks_pin(&p, &disc("https://attacker/jwks")).unwrap_err();
+        assert!(matches!(err, TimError::Unprocessable(_)));
     }
 }
