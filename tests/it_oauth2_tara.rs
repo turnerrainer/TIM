@@ -89,6 +89,7 @@ async fn setup_tara_with_mappings(
             cache_ttl_seconds: 3600,
         },
         allowed_redirect_uris: vec!["https://tim.example.com/auth/callback/tara".into()],
+        allow_http_discovery: true,
     };
     for (canonical, provider_key) in mappings {
         provider

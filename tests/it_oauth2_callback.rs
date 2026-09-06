@@ -66,6 +66,7 @@ async fn setup_with_provider(server_url: &str) -> Option<axum::Router> {
         claim_mappings: Default::default(),
         token_validation: TokenValidationConfig::default(),
         allowed_redirect_uris: vec!["https://tim.example.com/auth/callback/mock".into()],
+        allow_http_discovery: true,
     };
     provider
         .claim_mappings

@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `now() - make_interval(secs => $N::int)` instead of the string-concat-
   then-cast form. Semantics identical (bind is still parameterised —
   no injection path either way); the new form reads what it does.
+- OIDC discovery is now fail-closed on plain HTTP. `provider.
+  discovery_url` and endpoints inside the discovery document
+  (`authorization_endpoint`, `token_endpoint`, `jwks_uri`) must all
+  use `https://` or startup / login refuses. Operators intentionally
+  running against a non-TLS mock IdP for dev must set
+  `oauth2.providers.<id>.allow_http_discovery: true`. Closes MITM
+  substitution of the JWKS URI on the discovery fetch.
 
 ### Fixed
 
