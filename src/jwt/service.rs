@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::errors::ErrorKind as JwtErrorKind;
 use jsonwebtoken::{Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -154,15 +155,15 @@ impl JwtService {
     pub async fn validate(&self, req: ValidateRequest) -> Result<ValidateResponse> {
         // First parse without validation to inspect claims / route.
         let v = permissive_validation();
-        let decoded = match self.signer.verify::<StandardClaims>(&req.token, &v) {
+        let decoded = match self.signer.verify_raw::<StandardClaims>(&req.token, &v) {
             Ok(d) => d,
             Err(e) => {
                 tracing::debug!(error = %e, "validate: token decode failed");
-                let reason = if format!("{e}").to_lowercase().contains("expired") {
-                    "expired"
-                } else {
-                    "signature_mismatch"
-                };
+                // Classify via typed ErrorKind rather than string-matching
+                // the Display output — jsonwebtoken upgrades that change
+                // error text used to silently reclassify every non-expiry
+                // failure as `signature_mismatch`.
+                let reason = classify_jwt_error(&e);
                 return Ok(ValidateResponse {
                     valid: false,
                     active: false,
@@ -673,6 +674,27 @@ fn permissive_validation() -> Validation {
     v
 }
 
+/// Map a `jsonwebtoken` error to a stable, monitoring-friendly
+/// reason code. Prior code did `format!("{e}").contains("expired")`
+/// which drifts silently on upstream error-text changes.
+pub(crate) fn classify_jwt_error(e: &jsonwebtoken::errors::Error) -> &'static str {
+    match e.kind() {
+        JwtErrorKind::ExpiredSignature => "expired",
+        JwtErrorKind::InvalidSignature => "signature_mismatch",
+        JwtErrorKind::InvalidAudience => "invalid_audience",
+        JwtErrorKind::InvalidIssuer => "invalid_issuer",
+        JwtErrorKind::ImmatureSignature => "not_yet_valid",
+        JwtErrorKind::InvalidToken
+        | JwtErrorKind::MissingRequiredClaim(_)
+        | JwtErrorKind::InvalidEcdsaKey
+        | JwtErrorKind::InvalidRsaKey(_) => "malformed_token",
+        JwtErrorKind::InvalidAlgorithmName
+        | JwtErrorKind::InvalidKeyFormat
+        | JwtErrorKind::InvalidAlgorithm => "key_mismatch",
+        _ => "validation_failed",
+    }
+}
+
 fn response_from(
     claims: &StandardClaims,
     valid: bool,
@@ -729,6 +751,37 @@ mod tests {
         assert!(!out.contains_key("sub"));
         assert!(!out.contains_key("iat"));
         assert_eq!(out.get("role"), Some(&Value::String("admin".into())));
+    }
+
+    #[test]
+    fn classify_maps_typed_error_kinds() {
+        use jsonwebtoken::errors::{Error, ErrorKind};
+        // A few representative kinds — the mapping is what monitoring
+        // keys on, so it MUST be stable across `jsonwebtoken` upgrades.
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::ExpiredSignature)),
+            "expired"
+        );
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::InvalidSignature)),
+            "signature_mismatch"
+        );
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::InvalidAudience)),
+            "invalid_audience"
+        );
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::InvalidIssuer)),
+            "invalid_issuer"
+        );
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::ImmatureSignature)),
+            "not_yet_valid"
+        );
+        assert_eq!(
+            classify_jwt_error(&Error::from(ErrorKind::InvalidToken)),
+            "malformed_token"
+        );
     }
 
     #[test]
