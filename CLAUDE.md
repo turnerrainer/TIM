@@ -1,8 +1,7 @@
 # CLAUDE.md
 
-Instructions for LLM agents working on this repo. Human onboarding
-lives in `HANDOFF.md`; user-facing docs in `README.md` and the book
-at `book/src/`.
+Instructions for LLM agents working on this repo. User-facing docs
+live in `README.md` and the book at `book/src/`.
 
 ## What TIM is
 
@@ -104,24 +103,27 @@ Postgres schema and coordinate via an advisory lock in
 - Each PR gets its own CHANGELOG entry under `[Unreleased]`; the
   release commit rolls them into a dated version header.
 - **Cost of the per-PR CHANGELOG convention:** cascading conflicts
-  when merging a batch. For the v1 audit batch (9 PRs), CHANGELOG
-  was the *only* real conflict in 6 of 7 rebase cycles. If you're
-  helping plan a future batch, propose deferring CHANGELOG entries
-  to a single release-notes PR — see the "Lessons" bullet in
-  `HANDOFF.md`.
+  when merging a batch. For the v0.3.0-alpha batch (9 PRs),
+  CHANGELOG was the *only* real conflict in 6 of 7 rebase cycles.
+  If you're helping plan a future batch, propose deferring CHANGELOG
+  entries to a single release-notes PR.
 - Base branch: `dev`. `main` is release-only.
 - Force-push to PR branches is expected for rebase-on-conflict
   workflows. Use `--force-with-lease` with the current remote SHA.
 
 ## Where to look for context
 
-- `HANDOFF.md` — human-oriented handoff, audit pipeline provenance,
-  next-actions list.
 - `CHANGELOG.md` — canonical history, including 0.3.0-alpha
   upgrade notes.
-- `book/src/reference/audit.md` — audit summary for operators.
-- `docs/DESIGN.md` — domain model.
+- `README.md` — user-facing intro + upgrade pointer.
+- `book/src/` — mdBook: getting started, configuration, OAuth2/OIDC,
+  security hardening, legacy compatibility, failure modes, and the
+  API + config reference chapters.
 - `STANDARDS.md` — project-specific addendum to Buerostack Rust
-  standards.
-- `h2ckme/TIM-on-Rust/v1/AUDIT.md` (private, org access) —
-  finding-by-finding source material behind the v1 fix set.
+  standards (if present in the tree; check before referencing).
+- `migrations/` — sqlx-managed SQL schema evolution.
+
+Some maintainer-only governance artefacts (design docs, audit
+inputs, handoff notes) may exist locally but are `.gitignore`d and
+are not part of the public repo — do not assume the maintainer has
+shared them, and do not surface pointers to them in tracked files.

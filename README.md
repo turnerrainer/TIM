@@ -85,7 +85,6 @@ docker compose up -d --build
 
 - **Book** — [turnerrainer.github.io/TIM](https://turnerrainer.github.io/TIM/)
   (getting started, config, OAuth2, failure modes)
-- **Design** — [`docs/DESIGN.md`](./docs/DESIGN.md) — full domain model
 - **Standards** — [`STANDARDS.md`](./STANDARDS.md) — project-specific
   addendum to Buerostack Rust standards
 - **Changelog** — [`CHANGELOG.md`](./CHANGELOG.md)
