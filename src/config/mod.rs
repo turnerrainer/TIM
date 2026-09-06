@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub oauth2: OAuth2Config,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub introspection: IntrospectionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -174,6 +176,32 @@ impl Default for TokenValidationConfig {
     }
 }
 
+/// Optional client authentication for `POST /introspect`.
+///
+/// RFC 7662 §2.1 recommends that the introspection endpoint reject
+/// unauthenticated requests. TIM defaults to `required_client_auth =
+/// false` for backwards compatibility with existing downstream
+/// callers, but public deployments SHOULD set it to `true` and list
+/// the callers that are allowed to introspect.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntrospectionConfig {
+    #[serde(default)]
+    pub required_client_auth: bool,
+    /// Registered introspection clients. Each entry lists a
+    /// `client_id` (compared plaintext) and the env var that carries
+    /// the secret (resolved once at boot, compared with `subtle`).
+    #[serde(default)]
+    pub clients: Vec<IntrospectionClient>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntrospectionClient {
+    pub client_id: String,
+    pub client_secret_env: String,
+}
+
 /// HTTP-layer security posture.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -319,6 +347,26 @@ impl AppConfig {
                 "oauth2.session_store=postgres requires oauth2.session_encryption_key_env".into(),
             ));
         }
+        if self.introspection.required_client_auth && self.introspection.clients.is_empty() {
+            return Err(TimError::Config(
+                "introspection.required_client_auth=true requires \
+                 at least one entry in introspection.clients"
+                    .into(),
+            ));
+        }
+        for c in &self.introspection.clients {
+            if c.client_id.trim().is_empty() {
+                return Err(TimError::Config(
+                    "introspection.clients[*].client_id must be non-empty".into(),
+                ));
+            }
+            if c.client_secret_env.trim().is_empty() {
+                return Err(TimError::Config(format!(
+                    "introspection.clients[{}].client_secret_env must be non-empty",
+                    c.client_id
+                )));
+            }
+        }
         // The default redirect_uri synthesised for callbacks needs a
         // public base URL that is not `http://localhost:<port>` in
         // any deployment where the bind is non-loopback.
@@ -446,6 +494,18 @@ impl AppConfig {
                  first-request MITM against TIM leaks bearer tokens in the \
                  clear. Add `preload` to security.strict_transport_security \
                  AND submit the deployment domain to https://hstspreload.org.");
+        }
+
+        // introspection
+        info!(target: "tim::config::diagnose",
+            required_client_auth = self.introspection.required_client_auth,
+            client_count = self.introspection.clients.len(),
+            "introspection");
+        if !self.introspection.required_client_auth {
+            tracing::warn!(target: "tim::config::diagnose",
+                "introspection.required_client_auth = false — POST /introspect is \
+                 unauthenticated. RFC 7662 §2.1 recommends client auth on public \
+                 deployments; enable it and populate introspection.clients.");
         }
 
         // oauth2

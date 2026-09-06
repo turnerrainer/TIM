@@ -186,6 +186,39 @@ setting to `false` and leaving `admin_token_env: ""` is a valid but
 noisy combination (WARN in the log; **do not deploy to production
 this way**).
 
+## `introspection`
+
+RFC 7662 §2.1 recommends that `POST /introspect` require client
+authentication. TIM ships with the gate disabled for backwards
+compatibility with existing downstream callers.
+
+```yaml
+introspection:
+  required_client_auth: false     # default
+  clients: []
+```
+
+When enabling the gate, register every legitimate downstream caller:
+
+```yaml
+introspection:
+  required_client_auth: true
+  clients:
+    - client_id: "ruuter-classifier"
+      client_secret_env: "TIM_INTROSPECT_RUUTER_SECRET"
+    - client_id: "analytics-worker"
+      client_secret_env: "TIM_INTROSPECT_ANALYTICS_SECRET"
+```
+
+Callers then present `Authorization: Basic <base64(id:secret)>` on
+every request. Missing header, unknown id, or wrong secret → 401.
+Secret comparison is constant-time (`subtle::ConstantTimeEq`).
+
+Startup fails if any referenced `client_secret_env` is unset when
+`required_client_auth: true`, or if the list is empty. Turning the
+gate on is a breaking change for any current downstream that calls
+`/introspect` without Basic auth — plan migration.
+
 ## Environment variables
 
 Every value TIM reads at runtime is one of:

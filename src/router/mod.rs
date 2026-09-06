@@ -24,6 +24,7 @@ use crate::oauth2::session::SharedSessionStore;
 use crate::oauth2::ProviderRegistry;
 use crate::security::admin::{AdminAuth, AdminGate};
 use crate::security::headers;
+use crate::security::introspect_auth::IntrospectionGate;
 use crate::security::session_auth::SessionAuth;
 
 #[derive(Clone)]
@@ -35,6 +36,7 @@ pub struct AppState {
     pub providers: Arc<ProviderRegistry>,
     pub sessions: SharedSessionStore,
     pub admin: AdminGate,
+    pub introspect_gate: IntrospectionGate,
 }
 
 impl FromRef<AppState> for AdminGate {
@@ -267,6 +269,17 @@ async fn introspect_dispatch(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<IntrospectionResponse>> {
+    // RFC 7662 §2.1: optional client authentication. Default off for
+    // backwards compatibility with existing downstream callers.
+    // Operators SHOULD enable it in production so unauthenticated
+    // enumeration + DB-load DoS against the denylist SELECT is closed.
+    if s.introspect_gate.required() {
+        let raw = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(TimError::Unauthorized)?;
+        s.introspect_gate.verify_basic(raw)?;
+    }
     let ct = headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())

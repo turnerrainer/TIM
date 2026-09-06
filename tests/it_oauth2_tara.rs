@@ -116,6 +116,7 @@ async fn setup_tara_with_mappings(
         providers,
         sessions,
         admin,
+        introspect_gate: tim::security::IntrospectionGate::default(),
     };
     Some(build_router(state, &cfg))
 }

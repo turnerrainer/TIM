@@ -80,6 +80,7 @@ async fn setup() -> Option<(AppState, axum::Router)> {
         providers,
         sessions,
         admin,
+        introspect_gate: tim::security::IntrospectionGate::default(),
     };
     let router = build_router(state.clone(), &cfg);
     Some((state, router))

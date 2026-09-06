@@ -11,7 +11,7 @@ use tim::{
     jwt::JwtService,
     oauth2::{session as sessions_mod, state_sweeper, ProviderRegistry},
     router::{build_router, AppState},
-    security::admin::AdminGate,
+    security::{admin::AdminGate, introspect_auth::IntrospectionGate},
 };
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -67,6 +67,7 @@ async fn main() -> Result<()> {
     let providers = ProviderRegistry::from_config(&config.oauth2).await?;
     let sessions = sessions_mod::build(&config, pool.clone()).await?;
     let admin = AdminGate::from_config(&config.security)?;
+    let introspect_gate = IntrospectionGate::from_config(&config.introspection)?;
 
     state_sweeper::spawn(&config.oauth2, pool.clone(), sessions.clone());
 
@@ -78,6 +79,7 @@ async fn main() -> Result<()> {
         providers: Arc::new(providers),
         sessions,
         admin,
+        introspect_gate,
     };
 
     let addr: SocketAddr = format!("{}:{}", config.server.bind, config.server.port).parse()?;
