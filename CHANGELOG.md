@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Boot-time diagnostic in `AppConfig::diagnose` now warns loudly on
+  two long-standing operator footguns:
+  - **CORS wildcard exposes cross-origin reads.** When
+    `security.cors_allowed_origins` contains `"*"`, TIM logs that
+    every unauthenticated read endpoint (`/health`,
+    `/auth/providers`, ...) is now reachable cross-origin.
+  - **HSTS + non-loopback bind without `preload`.** When bind is
+    not loopback and `strict_transport_security` lacks `preload`,
+    TIM names both facts in one line and points at
+    `https://hstspreload.org`. First-request MITM against
+    non-preloaded HSTS deployments leaks bearer tokens in the clear.
+
 ## [0.2.1-alpha] - 2026-08-31
 
 Two OAuth2/OIDC defects, both surfaced against TARA

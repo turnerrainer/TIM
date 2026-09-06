@@ -399,13 +399,37 @@ impl AppConfig {
                 "security.cors_allowed_origins empty — no CORS layer emitted. \
                  Cross-origin browsers cannot call TIM directly.");
         } else if self.security.cors_allowed_origins.iter().any(|o| o == "*") {
+            // M5: wildcard exposes every public read (`/health`,
+            // `/auth/providers`, `/introspect/types`, ...) cross-origin.
             warn!(target: "tim::config::diagnose",
-                "security.cors_allowed_origins contains \"*\" — wildcard CORS. \
-                 Cannot use credentials cross-origin.");
+                "security.cors_allowed_origins contains \"*\" — wildcard CORS \
+                 exposes every unauthenticated read cross-origin. Set an \
+                 explicit list for production. RFC 6265 blocks cookie use \
+                 with wildcard so admin auth is unaffected, but public \
+                 endpoints are readable from any browser.");
         }
         if self.security.content_security_policy.is_empty() {
             warn!(target: "tim::config::diagnose",
                 "security.content_security_policy = \"\" — CSP header not emitted.");
+        }
+        // M4: HSTS + non-loopback bind. HSTS only protects the *second*
+        // request the browser makes to the origin, so first-request MITM
+        // remains trivial. `preload` in the header + submission to
+        // hstspreload.org closes that window.
+        let bind_is_loopback = self.server.bind == "127.0.0.1" || self.server.bind == "::1";
+        let hsts_has_preload = self
+            .security
+            .strict_transport_security
+            .to_lowercase()
+            .contains("preload");
+        if !bind_is_loopback && !hsts_has_preload {
+            warn!(target: "tim::config::diagnose",
+                bind = %self.server.bind,
+                hsts = %self.security.strict_transport_security,
+                "HSTS header lacks `preload` and bind is not loopback — \
+                 first-request MITM against TIM leaks bearer tokens in the \
+                 clear. Add `preload` to security.strict_transport_security \
+                 AND submit the deployment domain to https://hstspreload.org.");
         }
 
         // oauth2
