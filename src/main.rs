@@ -26,11 +26,18 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Audit LOG-v1 FN-LOG-1: emit ANSI colour codes only when stderr is
+    // a TTY (developer running `cargo run` locally). Under Docker /
+    // systemd / any log-shipper pipe, disable ANSI to keep the log
+    // stream SIEM-friendly and prevent attacker-injected ESC bytes
+    // from blending with server-emitted noise.
+    use std::io::IsTerminal;
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_target(true)
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
 
     let cli = Cli::parse();
