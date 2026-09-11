@@ -87,7 +87,12 @@ pub fn build_router(state: AppState, cfg: &AppConfig) -> Router {
         .route("/auth/health", get(auth_health))
         .layer(DefaultBodyLimit::max(cfg.server.max_request_bytes))
         .layer(TimeoutLayer::new(request_timeout))
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        // Audit LOG-v1 FN-LOG-2: emit one INFO line per completed request
+        // for SOC2/ISO27001 access-log compliance. See src/access_log.rs.
+        .layer(axum::middleware::from_fn(
+            crate::access_log::access_log_middleware,
+        ));
 
     // Response-header middleware — inserted here so every route
     // inherits them, including 404s produced by axum itself.
