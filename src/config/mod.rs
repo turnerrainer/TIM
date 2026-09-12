@@ -367,10 +367,24 @@ impl AppConfig {
                 )));
             }
         }
+        // h2ck.me PR #10 review nit: an empty-string `jwks_uri` pin is
+        // indistinguishable at runtime from "no pin set" — silently
+        // permissive despite the operator's clear intent to pin.
+        // Reject at config load rather than boot with a broken pin.
+        for (id, provider) in &self.oauth2.providers {
+            if let Some(pin) = &provider.jwks_uri {
+                if pin.trim().is_empty() {
+                    return Err(TimError::Config(format!(
+                        "oauth2.providers[{id}].jwks_uri must be non-empty when set \
+                         (omit the field entirely to disable pinning)"
+                    )));
+                }
+            }
+        }
         // The default redirect_uri synthesised for callbacks needs a
         // public base URL that is not `http://localhost:<port>` in
         // any deployment where the bind is non-loopback.
-        if self.server.public_base_url.is_empty() && self.server.bind != "127.0.0.1" {
+        if self.server.public_base_url.is_empty() && !bind_is_loopback(&self.server.bind) {
             tracing::warn!(
                 bind = %self.server.bind,
                 "server.public_base_url is empty; callers must pass ?redirect_uri= explicitly \
@@ -480,13 +494,20 @@ impl AppConfig {
         // request the browser makes to the origin, so first-request MITM
         // remains trivial. `preload` in the header + submission to
         // hstspreload.org closes that window.
-        let bind_is_loopback = self.server.bind == "127.0.0.1" || self.server.bind == "::1";
+        //
+        // h2ck.me PR #9 review nit: previously this compared the bind
+        // string against a two-value allowlist (`"127.0.0.1"` or `"::1"`).
+        // An operator binding `127.0.0.2` for test isolation, `[::1]`
+        // with brackets, `localhost` by hostname, or `::ffff:127.0.0.1`
+        // (IPv4-mapped IPv6) got a spurious HSTS-preload warning. See
+        // `bind_is_loopback` for the widened rule.
+        let is_loopback = bind_is_loopback(&self.server.bind);
         let hsts_has_preload = self
             .security
             .strict_transport_security
             .to_lowercase()
             .contains("preload");
-        if !bind_is_loopback && !hsts_has_preload {
+        if !is_loopback && !hsts_has_preload {
             warn!(target: "tim::config::diagnose",
                 bind = %self.server.bind,
                 hsts = %self.security.strict_transport_security,
@@ -551,6 +572,53 @@ impl AppConfig {
             }
         }
     }
+}
+
+/// h2ck.me PR #9 review nit — widened rule for "is this bind address
+/// on a loopback interface, and therefore safe from first-request
+/// MITM without HSTS-preload?" The previous check only matched the
+/// exact strings `"127.0.0.1"` and `"::1"`; every other loopback
+/// notation triggered a spurious WARN at boot.
+///
+/// Rule:
+/// - `localhost` (case-insensitive hostname);
+/// - any IPv4 in `127.0.0.0/8` (127.0.0.2, 127.0.0.42, etc.);
+/// - `::1` and the bracketed form `[::1]` (as an operator might
+///   have copied from a URL);
+/// - `::ffff:127.0.0.1` (IPv4-mapped IPv6, if some future compose
+///   sets that).
+///
+/// Anything that fails to parse as a well-known loopback returns
+/// `false` (i.e. the caller emits the WARN). Kept in `config` module
+/// so `diagnose()` and `validate()` share the same rule — a diagnosis
+/// mismatch across the two sites would be its own footgun.
+pub(crate) fn bind_is_loopback(bind: &str) -> bool {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    let raw = bind.trim();
+    if raw.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    // `[::1]` → strip the brackets so `IpAddr::from_str` can parse.
+    let unbracketed = raw
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(raw);
+    if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+        return match ip {
+            IpAddr::V4(v4) => v4.octets()[0] == 127,
+            IpAddr::V6(v6) => {
+                v6 == Ipv6Addr::LOCALHOST
+                    || v6.to_ipv4_mapped().map(|m| m.octets()[0] == 127) == Some(true)
+                    // Rare, but v4-compat rather than v4-mapped: ::127.0.0.1
+                    || v6
+                        .to_ipv4()
+                        .map(|m| m != Ipv4Addr::UNSPECIFIED && m.octets()[0] == 127)
+                        == Some(true)
+            }
+        };
+    }
+    false
 }
 
 fn default_bind() -> String {
@@ -721,5 +789,98 @@ oauth2:
     fn validate_accepts_memory_default() {
         let c = AppConfig::default();
         assert!(c.validate().is_ok());
+    }
+
+    /// h2ck.me PR #10 review nit — an empty-string `jwks_uri` pin is
+    /// silently permissive at runtime; reject at load.
+    #[test]
+    fn validate_rejects_empty_jwks_uri_pin() {
+        let yaml = r#"
+oauth2:
+  providers:
+    demo:
+      name: "demo"
+      discovery_url: "https://idp/.well-known/openid-configuration"
+      client_id_env: "X"
+      client_secret_env: "Y"
+      jwks_uri: ""
+"#;
+        let c: AppConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("jwks_uri"),
+            "expected jwks_uri in error: {err}"
+        );
+        assert!(
+            err.contains("demo"),
+            "expected provider id `demo` in error: {err}"
+        );
+    }
+
+    /// Whitespace-only pin is treated the same as empty.
+    #[test]
+    fn validate_rejects_whitespace_only_jwks_uri_pin() {
+        let yaml = r#"
+oauth2:
+  providers:
+    demo:
+      name: "demo"
+      discovery_url: "https://idp/.well-known/openid-configuration"
+      client_id_env: "X"
+      client_secret_env: "Y"
+      jwks_uri: "   "
+"#;
+        let c: AppConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(c.validate().is_err());
+    }
+
+    /// Omitting the field entirely is fine (no pin — existing
+    /// behaviour). This is the "how do I disable pinning" path.
+    #[test]
+    fn validate_accepts_missing_jwks_uri_pin() {
+        let yaml = r#"
+oauth2:
+  providers:
+    demo:
+      name: "demo"
+      discovery_url: "https://idp/.well-known/openid-configuration"
+      client_id_env: "X"
+      client_secret_env: "Y"
+"#;
+        let c: AppConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(c.validate().is_ok());
+    }
+
+    /// h2ck.me PR #9 review nit — every well-known loopback notation.
+    #[test]
+    fn bind_is_loopback_accepts_every_well_known_form() {
+        // IPv4 loopback range 127.0.0.0/8
+        assert!(bind_is_loopback("127.0.0.1"));
+        assert!(bind_is_loopback("127.0.0.2"));
+        assert!(bind_is_loopback("127.0.0.42"));
+        assert!(bind_is_loopback("127.255.255.254"));
+        // IPv6 loopback
+        assert!(bind_is_loopback("::1"));
+        assert!(bind_is_loopback("[::1]"));
+        // IPv4-mapped v6
+        assert!(bind_is_loopback("::ffff:127.0.0.1"));
+        assert!(bind_is_loopback("[::ffff:127.0.0.1]"));
+        // localhost hostname
+        assert!(bind_is_loopback("localhost"));
+        assert!(bind_is_loopback("LOCALHOST"));
+        assert!(bind_is_loopback("LocalHost"));
+        // Trim leading / trailing whitespace defensively
+        assert!(bind_is_loopback("  127.0.0.1 "));
+    }
+
+    #[test]
+    fn bind_is_loopback_rejects_non_loopback() {
+        assert!(!bind_is_loopback("0.0.0.0"));
+        assert!(!bind_is_loopback("10.0.0.1"));
+        assert!(!bind_is_loopback("192.168.1.1"));
+        assert!(!bind_is_loopback("::")); // unspecified, not loopback
+        assert!(!bind_is_loopback("2001:db8::1"));
+        assert!(!bind_is_loopback("example.com"));
+        assert!(!bind_is_loopback(""));
     }
 }

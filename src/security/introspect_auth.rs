@@ -81,11 +81,21 @@ impl IntrospectionGate {
     /// as pulled from the `Authorization` header). Returns `Ok(())` on
     /// a match, `Err(Unauthorized)` otherwise. Never leaks whether the
     /// failure was id-not-found vs. secret-mismatch.
+    ///
+    /// h2ck.me PR #4 review nit: the scheme name is compared
+    /// case-insensitively per RFC 7235 §2.1 ("Case-insensitive tokens
+    /// such as scheme names") — so `basic <b64>`, `BASIC <b64>`, and
+    /// `Basic <b64>` all take the same path.
     pub fn verify_basic(&self, header_value: &str) -> Result<(), TimError> {
-        let encoded = header_value
-            .strip_prefix("Basic ")
-            .ok_or(TimError::Unauthorized)?
-            .trim();
+        // Split off the scheme name — up to the first ASCII space —
+        // and compare against `basic` case-insensitively. Whitespace
+        // between scheme and credentials is a single SP per RFC 7235
+        // §2.1 but real clients send multiple spaces; strip any run.
+        let (scheme, rest) = header_value.split_once(' ').ok_or(TimError::Unauthorized)?;
+        if !scheme.eq_ignore_ascii_case("basic") {
+            return Err(TimError::Unauthorized);
+        }
+        let encoded = rest.trim_start();
         let decoded = B64.decode(encoded).map_err(|_| TimError::Unauthorized)?;
         let pair = std::str::from_utf8(&decoded).map_err(|_| TimError::Unauthorized)?;
         let (id, secret) = pair.split_once(':').ok_or(TimError::Unauthorized)?;
@@ -195,5 +205,32 @@ mod tests {
         let g = IntrospectionGate::from_config(&c).unwrap();
         let no_colon = format!("Basic {}", B64.encode(b"noColonAtAll"));
         assert!(g.verify_basic(&no_colon).is_err());
+    }
+
+    /// h2ck.me PR #4 review nit — RFC 7235 §2.1 scheme names are
+    /// case-insensitive.
+    #[test]
+    fn verify_accepts_lowercase_basic_scheme() {
+        std::env::set_var("TEST_INTROSPECT_LOWER", "s3cret");
+        let c = cfg(true, &[("caller", "TEST_INTROSPECT_LOWER")]);
+        let g = IntrospectionGate::from_config(&c).unwrap();
+        let encoded = B64.encode(b"caller:s3cret");
+        // `basic` (all lowercase) and `BASIC` (all uppercase) both pass.
+        assert!(g.verify_basic(&format!("basic {encoded}")).is_ok());
+        assert!(g.verify_basic(&format!("BASIC {encoded}")).is_ok());
+        assert!(g.verify_basic(&format!("BaSiC {encoded}")).is_ok());
+    }
+
+    /// Scheme name that isn't `basic` in any casing must still fail —
+    /// the case-insensitive relaxation is scoped to "Basic" only.
+    #[test]
+    fn verify_rejects_unknown_scheme_in_any_case() {
+        std::env::set_var("TEST_INTROSPECT_SCHEME", "s3cret");
+        let c = cfg(true, &[("caller", "TEST_INTROSPECT_SCHEME")]);
+        let g = IntrospectionGate::from_config(&c).unwrap();
+        let encoded = B64.encode(b"caller:s3cret");
+        assert!(g.verify_basic(&format!("bearer {encoded}")).is_err());
+        assert!(g.verify_basic(&format!("digest {encoded}")).is_err());
+        assert!(g.verify_basic(&format!("basik {encoded}")).is_err());
     }
 }
