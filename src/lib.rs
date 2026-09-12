@@ -7,6 +7,7 @@ pub mod access_log;
 pub mod config;
 pub mod crypto;
 pub mod db;
+pub mod doctor;
 pub mod error;
 pub mod introspect;
 pub mod jwt;
