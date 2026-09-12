@@ -26,19 +26,29 @@ struct ResolvedClient {
     secret: Arc<[u8]>,
 }
 
-/// Boot-resolved introspection gate. Shared via `AppState`.
+/// Boot-resolved introspection / validation gate. Shared via `AppState`.
+///
+/// One gate, three "required" axes — every axis walks the same client
+/// list. Adding a new gated endpoint class means adding one bool +
+/// exposing a getter here, NOT introducing a second gate type with a
+/// duplicated client resolver.
 #[derive(Clone, Default)]
 pub struct IntrospectionGate {
-    required: bool,
+    required_introspect: bool,
+    required_validation: bool,
+    required_jvm_compat: bool,
     clients: Arc<[ResolvedClient]>,
 }
 
 impl IntrospectionGate {
     /// Resolve every configured client_secret_env at startup. Returns
-    /// `Err` when `required_client_auth = true` and any referenced env
-    /// var is missing — fail-closed rather than boot with a broken
-    /// gate.
+    /// `Err` when ANY of the `required_*` axes is on and a referenced
+    /// env var is missing — fail-closed rather than boot with a broken
+    /// gate. Also fail-closed when any axis is on and clients is empty.
     pub fn from_config(cfg: &IntrospectionConfig) -> Result<Self, TimError> {
+        let any_required = cfg.required_client_auth
+            || cfg.gate_validation_endpoints
+            || cfg.gate_jvm_compat_endpoints;
         let mut resolved = Vec::with_capacity(cfg.clients.len());
         for c in &cfg.clients {
             match std::env::var(&c.client_secret_env) {
@@ -46,7 +56,7 @@ impl IntrospectionGate {
                     client_id: c.client_id.clone(),
                     secret: v.into_bytes().into(),
                 }),
-                _ if cfg.required_client_auth => {
+                _ if any_required => {
                     return Err(TimError::Config(format!(
                         "introspection.clients[{}].client_secret_env `{}` is unset or empty",
                         c.client_id, c.client_secret_env
@@ -67,14 +77,44 @@ impl IntrospectionGate {
                 "introspection client auth ENFORCED"
             );
         }
+        if cfg.gate_validation_endpoints {
+            tracing::info!(
+                client_count = resolved.len(),
+                "validation-endpoint client auth ENFORCED \
+                 (jwt/custom/validate + validate/boolean)"
+            );
+        }
+        if cfg.gate_jvm_compat_endpoints {
+            tracing::info!(
+                client_count = resolved.len(),
+                "jvm-compat validation-endpoint client auth ENFORCED \
+                 (jwt/userinfo + custom-jwt-verify + custom-jwt-userinfo)"
+            );
+        }
         Ok(Self {
-            required: cfg.required_client_auth,
+            required_introspect: cfg.required_client_auth,
+            required_validation: cfg.gate_validation_endpoints,
+            required_jvm_compat: cfg.gate_jvm_compat_endpoints,
             clients: resolved.into(),
         })
     }
 
+    /// Kept as the pre-existing name — the introspection endpoint
+    /// `/introspect` calls this to decide whether to check the header.
     pub fn required(&self) -> bool {
-        self.required
+        self.required_introspect
+    }
+
+    /// **Audit F-TIM-2:** whether `/jwt/custom/validate` +
+    /// `/jwt/custom/validate/boolean` must present Basic auth.
+    pub fn required_for_validation(&self) -> bool {
+        self.required_validation
+    }
+
+    /// **Audit F-TIM-6:** whether the JVM 1.x cookie-borne validation
+    /// compat endpoints must present Basic auth.
+    pub fn required_for_jvm_compat(&self) -> bool {
+        self.required_jvm_compat
     }
 
     /// Verify a Basic auth header value (the raw `Basic <base64>` string
@@ -130,6 +170,8 @@ mod tests {
     fn cfg(required: bool, entries: &[(&str, &str)]) -> IntrospectionConfig {
         IntrospectionConfig {
             required_client_auth: required,
+            gate_validation_endpoints: false,
+            gate_jvm_compat_endpoints: false,
             clients: entries
                 .iter()
                 .map(|(id, env)| IntrospectionClient {

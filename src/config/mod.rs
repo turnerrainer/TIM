@@ -193,9 +193,39 @@ impl Default for TokenValidationConfig {
 pub struct IntrospectionConfig {
     #[serde(default = "default_required_client_auth")]
     pub required_client_auth: bool,
+    /// **Audit F-TIM-2 (h2ck.me v1 PUBLIC-EXPOSURE):** extend the
+    /// same Basic-auth gate to `/jwt/custom/validate` +
+    /// `/jwt/custom/validate/boolean`. These endpoints have the same
+    /// DoS shape as `/introspect` (crypto verify → denylist SELECT),
+    /// but no gate exists today — an attacker can drive the DB pool
+    /// to exhaustion without credentials.
+    ///
+    /// Default `false` for backwards compatibility with existing
+    /// callers that call `/jwt/custom/validate` without Basic auth
+    /// (typically internal services fronted by Ruuter). Turn on when
+    /// TIM is exposed to untrusted networks or when Ruuter can
+    /// forward a Basic header from its guards.
+    #[serde(default)]
+    pub gate_validation_endpoints: bool,
+    /// **Audit F-TIM-6:** extend the same Basic-auth gate to the JVM
+    /// 1.x cookie-borne validation compat endpoints:
+    /// - `GET /jwt/userinfo`
+    /// - `POST /jwt/custom-jwt-verify`
+    /// - `POST /jwt/custom-jwt-userinfo`
+    ///
+    /// These require a cookie present, but the cookie value is not
+    /// authenticated — any value drives a crypto-verify + DB SELECT.
+    /// Same DoS shape as F-TIM-1/2.
+    ///
+    /// Default `false` — enabling breaks browser-direct DSL flows
+    /// unless the reverse proxy in front forwards a Basic header.
+    #[serde(default)]
+    pub gate_jvm_compat_endpoints: bool,
     /// Registered introspection clients. Each entry lists a
     /// `client_id` (compared plaintext) and the env var that carries
     /// the secret (resolved once at boot, compared with `subtle`).
+    /// Shared across every `gate_*` axis above — one client list, one
+    /// secret rotation policy.
     #[serde(default)]
     pub clients: Vec<IntrospectionClient>,
 }
@@ -204,6 +234,8 @@ impl Default for IntrospectionConfig {
     fn default() -> Self {
         Self {
             required_client_auth: default_required_client_auth(),
+            gate_validation_endpoints: false,
+            gate_jvm_compat_endpoints: false,
             clients: Vec::new(),
         }
     }
