@@ -29,7 +29,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # `contents: write` — required by `gh release create` in the
+  # release-note step below.
+  contents: write
   packages: write
   id-token: write
   attestations: write
@@ -241,6 +243,65 @@ jobs:
           done
 
           rm -rf "${key_dir}"
+
+      # Create the GitHub Release entry for this tag if one doesn't
+      # already exist. Body = the matching CHANGELOG.md section
+      # extracted by a simple sed-between-headings. Stable tags are
+      # marked `--latest`; pre-release tags (`-alpha`, `-beta`,
+      # `-rc`, ...) are marked `--prerelease` and are NOT elected
+      # Latest — casual visitors to the Releases page and consumers
+      # of the GitHub "latest release" API keep pointing at the
+      # newest stable rather than being pulled forward onto an
+      # unfinished pre-release. Skipped cleanly when the release
+      # already exists (backfilled by hand, re-runs, etc.).
+      #
+      # Runs AFTER Trivy + smoke tests so a Release entry only
+      # exists for a working image.
+      - name: Create or refresh GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_REF: ${{ github.event.inputs.tag || github.ref_name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG_REF}" >/dev/null 2>&1; then
+            echo "Release ${TAG_REF} already exists — leaving as-is."
+            exit 0
+          fi
+          # Extract the CHANGELOG section for this version. The
+          # heading format is `## [X.Y.Z-suffix] - YYYY-MM-DD`.
+          # sed prints lines strictly between this heading and the
+          # next `## ` heading, then drops the trailing blank line.
+          notes_file="$(mktemp)"
+          if ! sed -n "/^## \[${VERSION}\]/,/^## \[/{//!p;}" CHANGELOG.md \
+               | sed '${/^$/d}' > "${notes_file}"; then
+            echo "::warning::CHANGELOG.md has no section for [${VERSION}]"
+            printf 'Container images:\n- `docker pull turnerrainer/tim:%s`\n- `docker pull ghcr.io/turnerrainer/tim:%s`\n' \
+                   "${VERSION}" "${VERSION}" > "${notes_file}"
+          elif [ ! -s "${notes_file}" ]; then
+            echo "::warning::CHANGELOG.md section for [${VERSION}] parsed empty"
+            printf 'Container images:\n- `docker pull turnerrainer/tim:%s`\n- `docker pull ghcr.io/turnerrainer/tim:%s`\n' \
+                   "${VERSION}" "${VERSION}" > "${notes_file}"
+          fi
+          # Two shapes, mutually exclusive: stable → --latest,
+          # pre-release → --prerelease + --latest=false. `gh release
+          # create` refuses to combine `--latest` with `--prerelease`,
+          # and its default without either flag is server-side
+          # heuristics we don't want to depend on.
+          if [ "${PRERELEASE}" = "true" ]; then
+            gh release create "${TAG_REF}" \
+                --title "${TAG_REF}" \
+                --notes-file "${notes_file}" \
+                --prerelease \
+                --latest=false
+          else
+            gh release create "${TAG_REF}" \
+                --title "${TAG_REF}" \
+                --notes-file "${notes_file}" \
+                --latest
+          fi
+          rm -f "${notes_file}"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
