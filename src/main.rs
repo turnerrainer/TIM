@@ -1,13 +1,14 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tim::{
     config::AppConfig,
     crypto::JwtSigner,
-    db,
+    db, doctor,
     jwt::JwtService,
     oauth2::{session as sessions_mod, state_sweeper, ProviderRegistry},
     router::{build_router, AppState},
@@ -20,12 +21,60 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "tim", version, about = "Token Identity Manager")]
 struct Cli {
     /// Path to config file (YAML). Overrides TIM_CONFIG env var.
-    #[arg(short, long, env = "TIM_CONFIG")]
+    #[arg(short, long, env = "TIM_CONFIG", global = true)]
     config: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run the HTTP server (default when no subcommand is given).
+    Serve,
+    /// Pre-boot validator: parse config, resolve every referenced env
+    /// var, verify the JWT key file loads, print a PASS/WARN/FAIL
+    /// table, exit non-zero on any FAIL. Never binds a port or opens
+    /// a database connection.
+    Doctor {
+        /// Also exit non-zero on any WARN (for CI gating). Default
+        /// treats WARN as advisory.
+        #[arg(long)]
+        strict: bool,
+    },
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("Error: {e:?}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode> {
+    let cli = Cli::parse();
+    let command = cli.command.unwrap_or(Command::Serve);
+    match command {
+        Command::Doctor { strict } => {
+            // Doctor prints its own structured report; do NOT install
+            // the tracing subscriber (it would compete with stdout).
+            let report = doctor::run(cli.config.as_deref());
+            report.render_to(&mut std::io::stdout())?;
+            Ok(ExitCode::from(report.exit_code(strict) as u8))
+        }
+        Command::Serve => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(serve(cli.config))?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+async fn serve(config_path: Option<PathBuf>) -> Result<()> {
     // Audit LOG-v1 FN-LOG-1: emit ANSI colour codes only when stderr is
     // a TTY (developer running `cargo run` locally). Under Docker /
     // systemd / any log-shipper pipe, disable ANSI to keep the log
@@ -40,8 +89,7 @@ async fn main() -> Result<()> {
         .with_ansi(std::io::stderr().is_terminal())
         .init();
 
-    let cli = Cli::parse();
-    let config = AppConfig::load(cli.config.as_deref()).context("failed to load config")?;
+    let config = AppConfig::load(config_path.as_deref()).context("failed to load config")?;
     config.validate().context("config validation")?;
     info!(bind = %config.server.bind, port = config.server.port, "loaded config");
     // Boot-time diagnostic pass — logs every parsed config field
