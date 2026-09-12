@@ -10,15 +10,15 @@ Custom JWT lifecycle (generate / validate / extend / revoke / list)
 + OAuth2/OIDC multi-provider authentication + RFC 7662 token
 introspection, backed by PostgreSQL.
 
-- **Current version:** `0.3.0-alpha` (see `Cargo.toml`, `CHANGELOG.md`).
-- **Last tag:** `v0.2.1-alpha` — v0.3.0-alpha is staged on branch
-  `release/0.3.0-alpha` and not yet pushed as a tag.
+- **Current version:** `0.4.0-alpha` (see `Cargo.toml`, `CHANGELOG.md`).
+- **Last tag:** `v0.3.0-alpha` — v0.4.0-alpha is staged on branch
+  `release/0.4.0-alpha` and not yet pushed as a tag.
 - **Docs:** the mdBook under `book/src/` is authoritative for
   operator-facing behaviour. `CHANGELOG.md` (top-level) is the
   canonical release log; `book/src/reference/changelog.md` is a
   manually-maintained mirror — copy the top-level file over the
   book copy when cutting a release (the two are byte-identical
-  as of 0.3.0-alpha). No auto-regeneration hook wired up.
+  as of 0.4.0-alpha). No auto-regeneration hook wired up.
 
 ## Breaking / behaviour changes since v0.2.1-alpha
 
