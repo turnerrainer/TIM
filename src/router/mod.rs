@@ -317,6 +317,7 @@ async fn jwks(State(s): State<AppState>) -> Json<serde_json::Value> {
 // ---------------------- introspection ----------------------
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IntrospectForm {
     token: String,
     #[serde(default)]
@@ -406,6 +407,7 @@ async fn auth_provider_one(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LoginQuery {
     #[serde(default)]
     redirect_uri: Option<String>,
@@ -522,6 +524,7 @@ async fn auth_profile(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LogoutBody {
     #[serde(default)]
     reason: Option<String>,
