@@ -144,11 +144,7 @@ async fn health() -> impl IntoResponse {
 ///    with a bare-text body. This wrapper preserves the status code
 ///    but rewrites the body to `{"error":"payload_too_large","max":N}`
 ///    matching `TimError::PayloadTooLarge`.
-async fn body_size_error_mapper(
-    State(max): State<usize>,
-    req: Request,
-    next: Next,
-) -> Response {
+async fn body_size_error_mapper(State(max): State<usize>, req: Request, next: Next) -> Response {
     // Preflight: fast-reject when the client declares an oversize body.
     // A missing / malformed Content-Length means "unknown length" — we
     // fall through to the streaming cap enforced by DefaultBodyLimit.
