@@ -136,7 +136,7 @@ async fn traceparent_from_request_appears_in_access_log() {
 }
 
 /// When no traceparent header is sent, the middleware must still
-/// produce a trace_id (16-char hex fallback). Assert one is present.
+/// produce a fresh 32-char trace_id (fleet-strongholds §1.6).
 #[tokio::test]
 async fn access_log_populates_trace_id_when_header_absent() {
     let buf = common::log_capture::install();
@@ -150,20 +150,17 @@ async fn access_log_populates_trace_id_when_header_absent() {
 
     let delta = buf.slice_from(start);
     let text = String::from_utf8_lossy(&delta);
-    // Find `trace_id=<value>` in the emitted line; assert the value
-    // has ≥ 16 chars (the fresh-generated form) and only hex.
     let idx = text
         .find("trace_id=")
         .expect("trace_id field missing from access log");
     let after = &text[idx + "trace_id=".len()..];
-    // Field is space-separated in the fmt layer's default format.
     let end = after
         .find(|c: char| !c.is_ascii_hexdigit())
         .unwrap_or(after.len());
     let value = &after[..end];
-    assert!(
-        value.len() >= 16,
-        "trace_id `{}` is not the fresh 16-char fallback",
-        value
+    assert_eq!(
+        value.len(),
+        32,
+        "trace_id `{value}` is not the fresh 32-char form (fleet §1.6)"
     );
 }
