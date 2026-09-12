@@ -192,10 +192,29 @@ async fn jwt_generate(
     Ok(with_optional_set_cookie(Json(resp), cookie_value))
 }
 
+/// Audit F-TIM-2 (h2ck.me v1 PUBLIC-EXPOSURE): optional Basic-auth
+/// gate. Off by default (backward-compat); on when
+/// `introspection.gate_validation_endpoints: true`. Shares the same
+/// `introspection.clients` list as `/introspect`. Gate check runs
+/// BEFORE the DB SELECT + crypto verify, so an unauth flood is
+/// rejected with ~zero DB / CPU cost.
+fn check_validation_gate(s: &AppState, headers: &HeaderMap) -> Result<()> {
+    if !s.introspect_gate.required_for_validation() {
+        return Ok(());
+    }
+    let raw = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(TimError::Unauthorized)?;
+    s.introspect_gate.verify_basic(raw)
+}
+
 async fn jwt_validate(
     State(s): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<ValidateRequest>,
 ) -> Result<Response> {
+    check_validation_gate(&s, &headers)?;
     let resp = s.jwt.validate(req).await?;
     // Finding 16 & JVM parity: return 401 when the token is invalid
     // rather than always 200. Callers switching on HTTP status
@@ -210,8 +229,10 @@ async fn jwt_validate(
 
 async fn jwt_validate_boolean(
     State(s): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<ValidateRequest>,
 ) -> Result<Response> {
+    check_validation_gate(&s, &headers)?;
     let resp = s.jwt.validate(req).await?;
     let ok = resp.valid && resp.active;
     let body = if ok { "true" } else { "false" };
@@ -606,10 +627,28 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 //                                    ?jwt=<uuid>, ?sessionId=<id>,
 //                                    or cookie fallback.
 
+/// Audit F-TIM-6 (h2ck.me v1 PUBLIC-EXPOSURE): optional Basic-auth
+/// gate on the JVM 1.x cookie-borne validation endpoints. Off by
+/// default (DSL callers use cookie only); on when
+/// `introspection.gate_jvm_compat_endpoints: true`. Ruuter or the
+/// reverse proxy in front is expected to forward the Basic header
+/// when the gate is on.
+fn check_jvm_compat_gate(s: &AppState, headers: &HeaderMap) -> Result<()> {
+    if !s.introspect_gate.required_for_jvm_compat() {
+        return Ok(());
+    }
+    let raw = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(TimError::Unauthorized)?;
+    s.introspect_gate.verify_basic(raw)
+}
+
 async fn jwt_userinfo_compat(
     State(s): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
+    check_jvm_compat_gate(&s, &headers)?;
     let cookie_name = &s.config.jwt.cookie_name;
     let token = cookie_value(&headers, cookie_name)
         .ok_or_else(|| TimError::BadRequest(format!("cookie `{cookie_name}` not present")))?;
@@ -794,6 +833,7 @@ async fn jwt_custom_verify_compat(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response> {
+    check_jvm_compat_gate(&s, &headers)?;
     let cookie_name = body.trim().trim_matches('"').to_string();
     if cookie_name.is_empty() {
         return Err(TimError::BadRequest(
@@ -835,6 +875,7 @@ async fn jwt_custom_userinfo_compat(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response> {
+    check_jvm_compat_gate(&s, &headers)?;
     let cookie_name = body.trim().trim_matches('"').to_string();
     if cookie_name.is_empty() {
         return Err(TimError::BadRequest(

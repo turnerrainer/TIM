@@ -133,9 +133,20 @@ oauth2:
 # flag is on and no clients are configured.
 introspection:
   required_client_auth: true
+  # Audit F-TIM-2 (h2ck.me v1 PUBLIC-EXPOSURE): apply the same
+  # Basic-auth gate to /jwt/custom/validate + /jwt/custom/validate/boolean.
+  # Default false — turn on when TIM is exposed to untrusted networks
+  # OR when the reverse proxy in front can forward a Basic header.
+  gate_validation_endpoints: false
+  # Audit F-TIM-6: apply the same gate to the JVM 1.x cookie-borne
+  # validation compat endpoints (/jwt/userinfo, /jwt/custom-jwt-verify,
+  # /jwt/custom-jwt-userinfo). Default false — enabling breaks
+  # browser-direct DSL flows unless the proxy forwards a Basic header.
+  gate_jvm_compat_endpoints: false
   # Each client authenticates via HTTP Basic. The `_env` value names
   # an env var that carries the secret at boot; the secret itself is
-  # never in this file. Compared constant-time with `subtle`.
+  # never in this file. Compared constant-time with `subtle`. Shared
+  # across every gate axis above — one client list, one secret rotation.
   clients: []
   # Example:
   # clients:

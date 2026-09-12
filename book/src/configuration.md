@@ -221,6 +221,47 @@ introspection:
 Boot then emits a WARN naming the risk. Any deployment that reaches
 the public internet SHOULD keep the gate on.
 
+### Extending the gate to `/jwt/custom/validate*` (audit F-TIM-2)
+
+`/jwt/custom/validate` and `/jwt/custom/validate/boolean` have the
+same DoS shape as `/introspect` (crypto verify → denylist SELECT)
+but ship without an auth gate by default — every internal service
+that TIM issued a token for calls them constantly, so requiring
+Basic auth is BC-breaking for existing callers.
+
+For deployments where TIM is exposed to untrusted networks OR where
+the reverse proxy in front can forward a Basic header from its
+guards, opt in:
+
+```yaml
+introspection:
+  gate_validation_endpoints: true
+  # Same clients: list as above — one gate, one secret rotation.
+```
+
+With the gate on, an unauthenticated `POST /jwt/custom/validate`
+returns 401 BEFORE the DB SELECT + crypto verify run — so an
+attacker cannot drive the DB pool to exhaustion.
+
+### Extending the gate to JVM 1.x compat validation endpoints (audit F-TIM-6)
+
+Same shape for `/jwt/userinfo`, `/jwt/custom-jwt-verify`,
+`/jwt/custom-jwt-userinfo`. These require a cookie present, but
+the cookie value is not authenticated — any value drives a
+crypto-verify + DB SELECT.
+
+Enabling the gate breaks browser-direct DSL flows unless the
+reverse proxy forwards a Basic header on behalf of the browser:
+
+```yaml
+introspection:
+  gate_jvm_compat_endpoints: true
+```
+
+The three gates (`required_client_auth`, `gate_validation_endpoints`,
+`gate_jvm_compat_endpoints`) are independent — enable exactly the
+subset your topology permits.
+
 ## Environment variables
 
 Every value TIM reads at runtime is one of:

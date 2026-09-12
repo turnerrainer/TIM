@@ -185,6 +185,31 @@ front: nginx `limit_req`, envoy `local_ratelimit`, cloud WAF, etc.
 The admin-gated endpoints are the primary abuse targets; validate
 and userinfo are relatively cheap but still worth capping.
 
+## Validation-endpoint DoS gate (audit F-TIM-2, F-TIM-6)
+
+`/introspect` is not the only endpoint with the "crypto verify +
+DB SELECT" shape. `/jwt/custom/validate` and the JVM 1.x compat
+validation endpoints (`/jwt/userinfo`, `/jwt/custom-jwt-verify`,
+`/jwt/custom-jwt-userinfo`) share the same DoS profile: an attacker
+sending arbitrary tokens can drive the DB pool to exhaustion at low
+cost. TIM ships an opt-in Basic-auth gate that reuses the same
+`introspection.clients` list to protect these endpoints without
+adding a second secret-rotation policy.
+
+Turn on when TIM is exposed to untrusted networks OR when the
+reverse proxy in front can forward a Basic header on behalf of the
+DSL callers. See [Configuration →
+introspection](./configuration.md#introspection) for the three
+independent axes:
+
+- `introspection.required_client_auth` — protects `/introspect`
+  (default `true` since 0.4.0-alpha).
+- `introspection.gate_validation_endpoints` — protects
+  `/jwt/custom/validate` + `/validate/boolean` (default `false`).
+- `introspection.gate_jvm_compat_endpoints` — protects the three
+  JVM 1.x cookie-borne validation compat endpoints (default
+  `false` — enabling breaks browser-direct DSL flows).
+
 ## Pre-boot validation — `tim doctor`
 
 Every deploy should run `tim doctor` before restarting the service.
