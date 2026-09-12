@@ -2,11 +2,12 @@
 //!
 //! Fleet-strongholds §9.1 — during pentest engagements / break-tests
 //! / adversarial CI runs, TIM must NEVER accidentally reach a real
-//! upstream IdP. The XTR audit noted ~40 accidental probes hitting a
-//! live Estonian government service during a log-attack pass; TIM's
+//! upstream IdP. The XTR audit noted ~40 accidental probes reaching a
+//! real third-party SOAP service during a log-attack pass (test
+//! container had a WSDL overlay pointing at a live upstream); TIM's
 //! outbound surface is smaller (discovery, JWKS, token exchange) but
-//! the same risk class exists whenever a test config carries a
-//! production discovery URL.
+//! the same risk class exists whenever a test config carries a real
+//! discovery URL.
 //!
 //! Enable by setting `TIM_OFFLINE=1` (or `true`) at boot. Every
 //! outbound call at `src/oauth2/{discovery,jwks,flow}.rs` short-
