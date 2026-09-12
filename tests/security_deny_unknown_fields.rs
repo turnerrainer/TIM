@@ -47,6 +47,10 @@ async fn setup() -> Option<axum::Router> {
     cfg.security.require_admin_token = false;
     cfg.security.admin_token_env = String::new();
     cfg.oauth2.session_sweep_interval_seconds = 0;
+    // 0.4.0-alpha (FN1): default requires introspection client auth.
+    // This test exercises the deny_unknown_fields invariant, not the
+    // auth axis — opt out so the body parser is reached before auth.
+    cfg.introspection.required_client_auth = false;
 
     let pool = db::connect(&db_url, &cfg.database).await.ok()?;
     db::run_migrations(&pool).await.ok()?;
