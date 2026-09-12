@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, FromRef, Path, Query, State};
-use axum::http::header::{CONTENT_TYPE, SET_COOKIE};
+use axum::extract::{DefaultBodyLimit, FromRef, Path, Query, Request, State};
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::Next;
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -85,7 +86,18 @@ pub fn build_router(state: AppState, cfg: &AppConfig) -> Router {
         .route("/auth/profile", get(auth_profile))
         .route("/auth/logout", post(auth_logout))
         .route("/auth/health", get(auth_health))
+        // Audit RUNTIME-v1 FN3 + fleet-strongholds §2.3/§6.1:
+        // wrap the body-limit layer so 413 responses land as
+        // well-formed JSON (`{"error":"payload_too_large","max":N}`)
+        // instead of Axum's default bare-text
+        // "Failed to buffer the request body: length limit exceeded".
+        // Adds a Content-Length preflight so a client that DECLARES
+        // an oversize body is rejected before any bytes are read.
         .layer(DefaultBodyLimit::max(cfg.server.max_request_bytes))
+        .layer(axum::middleware::from_fn_with_state(
+            cfg.server.max_request_bytes,
+            body_size_error_mapper,
+        ))
         .layer(TimeoutLayer::new(request_timeout))
         .layer(TraceLayer::new_for_http());
 
@@ -117,6 +129,48 @@ pub fn build_router(state: AppState, cfg: &AppConfig) -> Router {
 
 async fn health() -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"status": "ok"})))
+}
+
+/// Wrap the body-limit layer so 413 responses land as structured JSON
+/// instead of Axum's default bare-text. See fleet-strongholds §2.3.
+///
+/// Two paths:
+/// 1. **Content-Length preflight** — a client that declares an
+///    oversize body via `Content-Length` gets 413 immediately, before
+///    any bytes are read into memory. Guards against the pattern
+///    where Axum's rejection reads the whole body first.
+/// 2. **Response rewrite** — an actual body-limit rejection produced
+///    by an axum extractor (`Bytes` / `Json` / `Form`) returns 413
+///    with a bare-text body. This wrapper preserves the status code
+///    but rewrites the body to `{"error":"payload_too_large","max":N}`
+///    matching `TimError::PayloadTooLarge`.
+async fn body_size_error_mapper(State(max): State<usize>, req: Request, next: Next) -> Response {
+    // Preflight: fast-reject when the client declares an oversize body.
+    // A missing / malformed Content-Length means "unknown length" — we
+    // fall through to the streaming cap enforced by DefaultBodyLimit.
+    if let Some(cl) = req.headers().get(CONTENT_LENGTH) {
+        if let Ok(s) = cl.to_str() {
+            if let Ok(n) = s.parse::<usize>() {
+                if n > max {
+                    return payload_too_large(max);
+                }
+            }
+        }
+    }
+    let response = next.run(req).await;
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        // Preserve the extractor's status but rewrite the body.
+        return payload_too_large(max);
+    }
+    response
+}
+
+fn payload_too_large(max: usize) -> Response {
+    (
+        StatusCode::PAYLOAD_TOO_LARGE,
+        Json(json!({ "error": "payload_too_large", "max": max })),
+    )
+        .into_response()
 }
 
 // ---------------------- custom JWT ----------------------
