@@ -51,6 +51,10 @@ impl JwksCache {
         if let Some(cached) = self.cache.get(jwks_uri).await {
             return Ok(cached);
         }
+        // Fleet §9.1: TIM_OFFLINE=1 short-circuits every outbound.
+        if let Some(e) = crate::http::block_if_offline(jwks_uri) {
+            return Err(e);
+        }
         let resp = self
             .http
             .get(jwks_uri)

@@ -7,6 +7,7 @@ pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod error;
+pub mod http;
 pub mod introspect;
 pub mod jwt;
 pub mod oauth2;

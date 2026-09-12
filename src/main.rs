@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
     // at INFO with WARN on non-secure or attention-required
     // settings. Grep `tim::config::diagnose` in logs.
     config.diagnose();
+    // Fleet §9.1: emit the TIM_OFFLINE WARN alongside other posture
+    // diagnostics so operators see it in the same boot log paragraph.
+    tim::http::diagnose_at_boot();
 
     let signer = JwtSigner::load_from_pem(&config.jwt.private_key_path, config.jwt.key_id.clone())
         .with_context(|| {

@@ -160,6 +160,10 @@ impl DiscoveryCache {
     }
 
     async fn fetch_once(&self, url: &str) -> Result<Discovery> {
+        // Fleet §9.1: TIM_OFFLINE=1 short-circuits every outbound.
+        if let Some(e) = crate::http::block_if_offline(url) {
+            return Err(e);
+        }
         let resp = self
             .http
             .get(url)
