@@ -143,7 +143,13 @@ async fn validation_gate_off_accepts_unauth() {
     let Some(router) = setup(false, false).await else {
         return;
     };
-    let (status, _) = post_json(&router, "/jwt/custom/validate", None, r#"{"token":"bogus"}"#).await;
+    let (status, _) = post_json(
+        &router,
+        "/jwt/custom/validate",
+        None,
+        r#"{"token":"bogus"}"#,
+    )
+    .await;
     // No auth gate; validate() runs, returns 401 for invalid token
     // (which is the pre-existing behaviour). What we care about here
     // is that we DID reach the validate() logic — not that we got
@@ -211,8 +217,13 @@ async fn validation_gate_on_covers_boolean_endpoint() {
     let Some(router) = setup(true, false).await else {
         return;
     };
-    let (status_unauth, _) =
-        post_json(&router, "/jwt/custom/validate/boolean", None, r#"{"token":"x"}"#).await;
+    let (status_unauth, _) = post_json(
+        &router,
+        "/jwt/custom/validate/boolean",
+        None,
+        r#"{"token":"x"}"#,
+    )
+    .await;
     assert_eq!(status_unauth, StatusCode::UNAUTHORIZED);
     let auth = basic(CLIENT_ID, SECRET_VAL);
     let (status_auth, _) = post_json(
@@ -312,8 +323,7 @@ async fn gates_are_independent() {
         return;
     };
     // Validation is gated:
-    let (vs, _) =
-        post_json(&router_v, "/jwt/custom/validate", None, r#"{"token":"x"}"#).await;
+    let (vs, _) = post_json(&router_v, "/jwt/custom/validate", None, r#"{"token":"x"}"#).await;
     assert_eq!(vs, StatusCode::UNAUTHORIZED);
     // JVM compat is NOT gated:
     let js = get_with_cookie(&router_v, "/jwt/userinfo", None, None).await;
@@ -324,10 +334,9 @@ async fn gates_are_independent() {
         return;
     };
     // Validation is NOT gated:
-    let (vs, _) =
-        post_json(&router_j, "/jwt/custom/validate", None, r#"{"token":"x"}"#).await;
+    let (vs, _) = post_json(&router_j, "/jwt/custom/validate", None, r#"{"token":"x"}"#).await;
     assert_eq!(vs, StatusCode::UNAUTHORIZED); // token invalid, NOT gate
-    // JVM compat IS gated:
+                                              // JVM compat IS gated:
     let js = get_with_cookie(&router_j, "/jwt/userinfo", None, Some("jwt=x")).await;
     assert_eq!(js, StatusCode::UNAUTHORIZED);
 }
