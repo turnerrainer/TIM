@@ -3,6 +3,7 @@
 //! Public surface intentionally minimal; integration tests import
 //! `crate::router::build_router` and `crate::config::AppConfig`.
 
+pub mod access_log;
 pub mod config;
 pub mod crypto;
 pub mod db;
