@@ -7,30 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.4.0-alpha] - 2026-09-12
 
-- **BREAKING** — `introspection.required_client_auth` now defaults to
-  `true` (audit FN1). `POST /introspect` refuses unauthenticated
-  requests unless the operator explicitly sets the flag to `false`.
-  Deployments that used to rely on the permissive default MUST register
-  each downstream caller under `introspection.clients` and provision
-  the referenced env vars, OR opt back out. Startup refuses if
-  `required_client_auth: true` and `clients` is empty. Boot-time WARN
-  from 0.3.0-alpha replaced by hard refusal — RFC 7662 §2.1 recommends
-  client auth on public deployments and pre-1.0 is the right time to
-  bake it in.
+Twelve PRs landed on `dev` between 2026-09-11 and 2026-09-12 as
+one coordinated batch closing every open h2ck.me v1 finding (LOG
+`FN-LOG-1..3`, RUNTIME `FN1..FN5`, PUBLIC-EXPOSURE `F-TIM-1..6`)
+plus eight fleet-strongholds patterns (§1.1, §1.2, §1.6, §2.2,
+§2.3, §6.1, §8.2, §9.1) and the CLAUDE.md breaking-change
+playbook for LLM agents.
+
+One breaking change — see the "Upgrading from 0.3.0-alpha"
+section below.
 
 ### Upgrading from 0.3.0-alpha
 
-**One breaking change (audit FN1).** To keep the previous behaviour,
-add this stanza to `tim.yaml` **before** upgrading:
+**One breaking change (audit FN1).** `introspection.required_client_auth`
+now defaults to `true`. `POST /introspect` refuses unauthenticated
+requests, and startup refuses if the flag is on and no
+`introspection.clients` are configured.
+
+To keep the previous permissive behaviour, add to `tim.yaml`
+**before** upgrading:
 
 ```yaml
 introspection:
   required_client_auth: false
 ```
 
-To take the new posture (recommended), register each caller:
+To take the recommended posture, register each caller:
 
 ```yaml
 introspection:
@@ -42,17 +46,164 @@ introspection:
 ```
 
 Then export `TIM_INTROSPECT_<name>_SECRET` for every referenced env
-var before starting TIM. Startup refuses if any referenced env var
-is unset while `required_client_auth` is on. Callers must present
-the secret as HTTP Basic:
+var before starting TIM. Callers present the secret as HTTP Basic
+(scheme case-insensitive per RFC 7235 §2.1):
 
 ```
 Authorization: Basic <base64(client_id:secret)>
 ```
 
-Scheme name is case-insensitive per RFC 7235 §2.1.
+**Two optional new gates** (audit F-TIM-2, F-TIM-6) reuse the same
+client list and both default `false`:
+
+- `introspection.gate_validation_endpoints: true` — extends the
+  gate to `/jwt/custom/validate` + `/jwt/custom/validate/boolean`.
+- `introspection.gate_jvm_compat_endpoints: true` — extends the
+  gate to `/jwt/userinfo`, `/jwt/custom-jwt-verify`,
+  `/jwt/custom-jwt-userinfo`. Enabling breaks browser-direct DSL
+  flows unless the reverse proxy forwards a Basic header.
+
+**Two operational notes** (non-breaking):
+
+- Log stream ANSI escapes now off in non-TTY environments. If your
+  log-shipper regex depends on ESC bytes for delimiter detection,
+  update it — the fleet reference (Ruuter, Resql) has always been
+  0 ESC bytes.
+- Every response now carries `traceparent` + `x-trace-id` headers.
+  Downstream tooling can correlate a response with TIM's access log
+  by grepping the trace-id.
 
 **No schema migration required.**
+
+### Added
+
+- **New subcommand `tim doctor` (`--strict` flag)** (fleet §8.2). Pre-boot
+  validator: parses `tim.yaml`, resolves every referenced env var,
+  verifies the JWT key file exists and parses as PKCS#8 PEM, prints
+  a structured `[ OK ] / [ WARN ] / [ FAIL ]` table. Exits `0` on
+  all-pass (WARN advisory), `1` on any FAIL or `--strict` + any
+  WARN. No side effects: never binds a port, never opens a
+  Postgres connection, never touches the network. Wire into deploy
+  pipelines as a pre-flight gate.
+- **`TIM_OFFLINE=1` env var** (fleet §9.1). When set (`1` / `true`
+  / `yes`), every outbound HTTP call (OIDC discovery, JWKS, token
+  exchange) short-circuits with 502. Intended for pentest /
+  adversarial CI runs; boot WARN emitted so operators see the
+  posture in the log. Snapshotted at first read.
+- **W3C Trace Context on every response** (fleet §1.6):
+  `traceparent: 00-<32-hex>-<16-hex>-<flags>` +
+  `x-trace-id: <32-hex>`. Inherits trace-id and flags from a
+  well-formed incoming `traceparent`; generates a fresh trace-id
+  otherwise. Span-id is always fresh — TIM is a new span within
+  the (possibly-inherited) trace. Emitted on 4xx and 5xx paths too.
+- **Per-request access log** (audit LOG-v1 FN-LOG-2, fleet §1.2).
+  One INFO line per completed request:
+  `INFO http_request_completed method=POST route=/introspect
+  status=200 duration_us=1234 trace_id=<32-hex>`. Deliberately
+  omits headers, request/response body, and client IP — Ruuter's
+  access log is authoritative for those.
+- **Two opt-in Basic-auth gates on validation surfaces** (audit
+  F-TIM-2, F-TIM-6). `introspection.gate_validation_endpoints`
+  protects `/jwt/custom/validate*`;
+  `introspection.gate_jvm_compat_endpoints` protects the three
+  JVM 1.x cookie-borne validation compat endpoints. Both share the
+  same `introspection.clients` list — one gate, one secret
+  rotation policy. Both default `false` for BC with existing DSL
+  callers.
+- **Structured JSON on 413 responses** (audit RUNTIME-v1 FN3,
+  fleet §2.3 / §6.1). Wrapped `DefaultBodyLimit` with a middleware
+  that returns `{"error":"payload_too_large","max":N}` with
+  `Content-Type: application/json` — instead of Axum's default
+  bare-text. Added a `Content-Length` preflight so an oversize-
+  declared body is rejected before any bytes are read.
+
+### Changed
+
+- **BREAKING** — `introspection.required_client_auth` now defaults
+  to `true` (audit FN1). See "Upgrading from 0.3.0-alpha" above.
+- Log stream ANSI escapes disabled under Docker / systemd / any
+  pipe (audit LOG-v1 FN-LOG-1). `tracing_subscriber::fmt::Layer`
+  gates ANSI on `std::io::stderr().is_terminal()`. Colours retained
+  when a developer runs `cargo run` at a TTY.
+- Every modern JSON body / form / query DTO now carries
+  `#[serde(deny_unknown_fields)]` (fleet §2.2). A request with an
+  unknown field returns 4xx naming the field, instead of silently
+  dropping it. Applies to: `POST /jwt/custom/{generate, validate,
+  extend, revoke, revoke/bulk, list/me}`, `POST /introspect` (JSON
+  + form), `GET /auth/login/:id` (query), `POST /auth/logout`
+  (body). Deliberately exempt (compat / IdP-driven surfaces): JVM
+  1.x compat endpoints, `GET /auth/callback/:id`, IdP response
+  DTOs.
+- `bind_is_loopback` helper widened (audit PR #9 nit). Previously
+  matched only `127.0.0.1` + `::1`; now accepts `127.0.0.0/8`,
+  `localhost` (case-insensitive), `[::1]`, `::ffff:127.0.0.1`.
+  Applied uniformly in both `AppConfig::validate()` and
+  `diagnose()` — one helper, two callers.
+- Basic auth scheme comparison now case-insensitive (audit PR #4
+  nit, RFC 7235 §2.1). `Basic`, `basic`, `BASIC`, `BaSiC` all take
+  the same path. Non-`basic` schemes (`bearer`, `digest`, …) still
+  refused in any casing.
+
+### Fixed
+
+- Empty-string `oauth2.providers.<id>.jwks_uri` pin now rejected at
+  config load (audit PR #10 nit). Previously silently permissive
+  at runtime — indistinguishable from "no pin set" despite the
+  operator's clear intent to pin. Omit the field entirely to
+  disable pinning.
+
+### Testing
+
+- New regression pins:
+  - `tests/security_log_ansi_off.rs` — 2 cases (FN-LOG-1).
+  - `tests/security_log_access_present.rs` — 3 cases (FN-LOG-2).
+  - `tests/security_introspect_no_token_leak.rs` — 3 cases
+    (FN-LOG-3).
+  - `tests/security_traceparent_response.rs` — 6 cases (fleet
+    §1.6).
+  - `tests/security_413_structured_body.rs` — 3 cases (FN3).
+  - `tests/security_deny_unknown_fields.rs` — 8 cases (fleet
+    §2.2).
+  - `tests/security_offline_mode.rs` — 1 case (fleet §9.1).
+  - `tests/security_validation_gate.rs` — 11 cases (F-TIM-2,
+    F-TIM-6).
+- Plus 20+ new unit tests across `src/config`, `src/doctor`,
+  `src/access_log`, `src/http`, `src/security/introspect_auth`.
+
+### Documentation
+
+- **CLAUDE.md — "Shipping a breaking change" playbook.** Self-
+  contained rules for LLM agents proposing new breaking changes:
+  what counts, version-bump mechanics, CHANGELOG discipline,
+  migration immutability, PR shape, explicit "must NOT" list.
+- **CLAUDE.md — verification loop grows a "smoke-test necessary"
+  paragraph.** Automated tests are necessary but not sufficient;
+  the exact live-boot smoke recipe is documented, with the
+  concrete reason (cross-branch bugs no unit test catches — one
+  was found in this batch by exactly this smoke pass).
+- **CLAUDE.md — new `tim` subcommands + environment variables
+  sections.** Code-layout expanded with new modules
+  (`src/access_log`, `src/doctor`, `src/http`).
+- **Book — `configuration.md`.** Introspection section rewritten
+  for the new default + three-axis gate model. `TIM_OFFLINE`
+  documented.
+- **Book — `security-hardening.md`.** Four new sections: `tim
+  doctor`, offline mode, W3C Trace Context, validation-endpoint
+  DoS gate.
+
+### Merged PRs
+
+- #13 security(log): disable ANSI + per-request access log middleware (audit FN-LOG-1, FN-LOG-2, FN-LOG-3)
+- #14 router(413): structured JSON body on payload-too-large (audit FN3)
+- #15 fix: h2ck.me v1 PR-review nits (empty jwks_uri pin, case-insensitive Basic, bind loopback)
+- #16 docs(claude): playbook for shipping a breaking change
+- #17 introspect(BREAKING): flip required_client_auth default to true (audit FN1)
+- #18 access_log: propagate W3C traceparent + x-trace-id on response (fleet §1.6)
+- #19 feat: `tim doctor` — pre-boot config + env validator (fleet §8.2)
+- #20 feat: TIM_OFFLINE=1 refuses every outbound HTTP call (fleet §9.1)
+- #21 chore: `#[serde(deny_unknown_fields)]` on modern request DTOs (fleet §2.2)
+- #22 docs(book+claude): tim doctor, TIM_OFFLINE, FN1 default, traceparent, deny_unknown
+- #23 security: gate /jwt/custom/validate + JVM compat validation endpoints (audit F-TIM-2, F-TIM-6)
 
 ## [0.3.0-alpha] - 2026-09-06
 
@@ -555,7 +706,8 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.3.0-alpha...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.4.0-alpha...HEAD
+[0.4.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.3.0-alpha...v0.4.0-alpha
 [0.3.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...v0.3.0-alpha
 [0.2.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...v0.2.1-alpha
 [0.2.0-alpha.2]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.1...v0.2.0-alpha.2

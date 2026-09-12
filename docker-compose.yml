@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: tim:0.3.0-alpha
+    image: tim:0.4.0-alpha
     container_name: tim
     depends_on:
       postgres:

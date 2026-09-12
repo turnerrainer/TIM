@@ -1,0 +1,104 @@
+name: auto-tag-on-dev
+
+# TIM's release convention is `dev` = the release branch (`main` is
+# unused). Every push to `dev` — merge of a feature PR, release PR, or
+# fix-up commit — passes through this workflow:
+#
+#   1. Read the version from Cargo.toml.
+#   2. If a `v<version>` tag does NOT yet exist on the remote, create
+#      it AND explicitly dispatch `publish.yml` against it.
+#   3. If the tag DOES exist (the common case — most `dev` merges do
+#      not bump the version), no-op.
+#
+# Effect: only version-bumping merges (the release PRs) trigger a
+# publish. Every feature-fix merge on `dev` is a cheap tag-exists
+# check.
+#
+# Why the explicit dispatch step: git-pushes made under the default
+# `GITHUB_TOKEN` intentionally do NOT trigger downstream workflows
+# (GHA safety default against recursion). Explicit `gh workflow run`
+# bridges that gap so "merge release PR = image published" holds
+# end-to-end.
+#
+# Idempotent: re-running (or force-pushing `dev`) does nothing when
+# the tag already exists. Publish itself is gated by the immutable
+# `v<version>` naming; you cannot accidentally re-publish a released
+# version without deleting the tag first.
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: auto-tag-dev
+  cancel-in-progress: false
+
+# `contents: write` — create + push the tag.
+# `actions: write` — invoke publish.yml via `gh workflow run`.
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          set -euo pipefail
+          v="$(grep -m1 '^version *= *"' Cargo.toml \
+                | sed -E 's/^version *= *"([^"]+)".*/\1/')"
+          if [ -z "${v}" ]; then
+            echo "::error::could not parse version from Cargo.toml"
+            exit 1
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${v}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${v}"
+
+      - name: Check if tag already exists
+        id: exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} does not yet exist; will create + dispatch publish."
+          fi
+
+      - name: Create and push tag
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "Release ${TAG} (auto-tagged from dev)"
+          git push origin "${TAG}"
+          echo "Pushed ${TAG}."
+
+      - name: Dispatch publish workflow
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # `workflow_dispatch` accepts events from other workflows as
+          # long as `actions: write` is granted. This is the standard
+          # workaround for "GITHUB_TOKEN pushes don't fire triggers."
+          gh workflow run publish.yml \
+            --ref "${TAG}" \
+            -f tag="${TAG}"
+          echo "Dispatched publish.yml against ${TAG}; watch the Actions tab."
