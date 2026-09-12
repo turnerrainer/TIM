@@ -228,6 +228,10 @@ pub async fn complete_callback(
             form.push(("code_verifier", v));
         }
     }
+    // Fleet §9.1: TIM_OFFLINE=1 short-circuits every outbound.
+    if let Some(e) = crate::http::block_if_offline(&discovery.token_endpoint) {
+        return Err(e);
+    }
     let resp = http
         .post(&discovery.token_endpoint)
         // client_secret_basic, which OIDC Core makes the default when the client
