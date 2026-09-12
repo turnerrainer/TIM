@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `introspection.required_client_auth` now defaults to
+  `true` (audit FN1). `POST /introspect` refuses unauthenticated
+  requests unless the operator explicitly sets the flag to `false`.
+  Deployments that used to rely on the permissive default MUST register
+  each downstream caller under `introspection.clients` and provision
+  the referenced env vars, OR opt back out. Startup refuses if
+  `required_client_auth: true` and `clients` is empty. Boot-time WARN
+  from 0.3.0-alpha replaced by hard refusal — RFC 7662 §2.1 recommends
+  client auth on public deployments and pre-1.0 is the right time to
+  bake it in.
+
+### Upgrading from 0.3.0-alpha
+
+**One breaking change (audit FN1).** To keep the previous behaviour,
+add this stanza to `tim.yaml` **before** upgrading:
+
+```yaml
+introspection:
+  required_client_auth: false
+```
+
+To take the new posture (recommended), register each caller:
+
+```yaml
+introspection:
+  required_client_auth: true
+  clients:
+    - client_id: "ruuter"
+      client_secret_env: "TIM_INTROSPECT_RUUTER_SECRET"
+    # ... one entry per downstream caller
+```
+
+Then export `TIM_INTROSPECT_<name>_SECRET` for every referenced env
+var before starting TIM. Startup refuses if any referenced env var
+is unset while `required_client_auth` is on. Callers must present
+the secret as HTTP Basic:
+
+```
+Authorization: Basic <base64(client_id:secret)>
+```
+
+Scheme name is case-insensitive per RFC 7235 §2.1.
+
+**No schema migration required.**
+
 ## [0.3.0-alpha] - 2026-09-06
 
 Post-audit release. Nine PRs (h2ck.me v1 audit findings + one Snyk

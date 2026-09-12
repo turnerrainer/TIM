@@ -124,3 +124,22 @@ oauth2:
   #     # as the default when the caller omits ?redirect_uri=.
   #     allowed_redirect_uris:
   #       - "https://tim.example.com/auth/callback/google"
+
+# RFC 7662 introspection.
+#
+# BREAKING in 0.4.0-alpha (audit FN1): `required_client_auth` now
+# defaults to `true`. Register at least one client below OR set
+# `required_client_auth: false` explicitly. Startup refuses if the
+# flag is on and no clients are configured.
+introspection:
+  required_client_auth: true
+  # Each client authenticates via HTTP Basic. The `_env` value names
+  # an env var that carries the secret at boot; the secret itself is
+  # never in this file. Compared constant-time with `subtle`.
+  clients: []
+  # Example:
+  # clients:
+  #   - client_id: "ruuter"
+  #     client_secret_env: "TIM_INTROSPECT_RUUTER_SECRET"
+  #   - client_id: "cronmanager"
+  #     client_secret_env: "TIM_INTROSPECT_CRONMANAGER_SECRET"

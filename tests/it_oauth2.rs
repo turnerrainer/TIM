@@ -32,6 +32,9 @@ async fn setup() -> Option<axum::Router> {
     cfg.security.require_admin_token = false;
     cfg.security.admin_token_env = String::new();
     cfg.oauth2.session_sweep_interval_seconds = 0;
+    // 0.4.0-alpha (FN1): introspection default is now on; this test
+    // does not exercise it — opt out explicitly.
+    cfg.introspection.required_client_auth = false;
     let pool = db::connect(&db_url, &cfg.database).await.ok()?;
     db::run_migrations(&pool).await.ok()?;
     let signer = JwtSigner::from_pkcs8_pem(TEST_KEY, "oauth2-it".into()).ok()?;

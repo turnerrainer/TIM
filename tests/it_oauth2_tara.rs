@@ -75,6 +75,9 @@ async fn setup_tara_with_mappings(
     cfg.security.require_admin_token = false;
     cfg.security.admin_token_env = String::new();
     cfg.oauth2.session_sweep_interval_seconds = 0;
+    // 0.4.0-alpha (FN1): introspection default is now on; this test
+    // does not exercise it — opt out explicitly.
+    cfg.introspection.required_client_auth = false;
     cfg.server.public_base_url = "https://tim.example.com".into();
 
     let mut provider = ProviderConfig {
