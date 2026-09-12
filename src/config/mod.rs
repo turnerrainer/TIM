@@ -415,7 +415,7 @@ impl AppConfig {
             request_timeout_seconds = self.server.request_timeout_seconds,
             public_base_url = %self.server.public_base_url,
             "server");
-        if self.server.public_base_url.is_empty() && self.server.bind != "127.0.0.1" {
+        if self.server.public_base_url.is_empty() && !bind_is_loopback(&self.server.bind) {
             warn!(target: "tim::config::diagnose",
                 "server.public_base_url is empty on a non-loopback bind — \
                  OAuth2 callbacks that omit ?redirect_uri= will fail. \
@@ -796,6 +796,8 @@ oauth2:
     #[test]
     fn validate_rejects_empty_jwks_uri_pin() {
         let yaml = r#"
+introspection:
+  required_client_auth: false
 oauth2:
   providers:
     demo:
@@ -821,6 +823,8 @@ oauth2:
     #[test]
     fn validate_rejects_whitespace_only_jwks_uri_pin() {
         let yaml = r#"
+introspection:
+  required_client_auth: false
 oauth2:
   providers:
     demo:
@@ -839,6 +843,8 @@ oauth2:
     #[test]
     fn validate_accepts_missing_jwks_uri_pin() {
         let yaml = r#"
+introspection:
+  required_client_auth: false
 oauth2:
   providers:
     demo:
