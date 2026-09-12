@@ -189,20 +189,13 @@ this way**).
 ## `introspection`
 
 RFC 7662 §2.1 recommends that `POST /introspect` require client
-authentication. TIM ships with the gate disabled for backwards
-compatibility with existing downstream callers.
+authentication. **As of 0.4.0-alpha the gate is on by default**
+(audit FN1) — a config that does not set `introspection.clients`
+refuses to start. Register every legitimate downstream caller:
 
 ```yaml
 introspection:
-  required_client_auth: false     # default
-  clients: []
-```
-
-When enabling the gate, register every legitimate downstream caller:
-
-```yaml
-introspection:
-  required_client_auth: true
+  required_client_auth: true      # default in 0.4.0-alpha
   clients:
     - client_id: "ruuter-classifier"
       client_secret_env: "TIM_INTROSPECT_RUUTER_SECRET"
@@ -210,14 +203,23 @@ introspection:
       client_secret_env: "TIM_INTROSPECT_ANALYTICS_SECRET"
 ```
 
-Callers then present `Authorization: Basic <base64(id:secret)>` on
-every request. Missing header, unknown id, or wrong secret → 401.
-Secret comparison is constant-time (`subtle::ConstantTimeEq`).
+Callers present `Authorization: Basic <base64(id:secret)>` on every
+request. Scheme name is case-insensitive per RFC 7235 §2.1 —
+`Basic`, `basic`, `BASIC` all take the same path. Missing header,
+unknown id, wrong secret → 401. Secret comparison is constant-time
+(`subtle::ConstantTimeEq`). Startup fails if any referenced
+`client_secret_env` is unset while the gate is on.
 
-Startup fails if any referenced `client_secret_env` is unset when
-`required_client_auth: true`, or if the list is empty. Turning the
-gate on is a breaking change for any current downstream that calls
-`/introspect` without Basic auth — plan migration.
+To opt out (dev, one-off scripts, running behind a proxy that
+authenticates the caller already):
+
+```yaml
+introspection:
+  required_client_auth: false
+```
+
+Boot then emits a WARN naming the risk. Any deployment that reaches
+the public internet SHOULD keep the gate on.
 
 ## Environment variables
 
@@ -228,6 +230,7 @@ Every value TIM reads at runtime is one of:
 - `RUST_LOG` — standard `tracing_subscriber::EnvFilter` syntax
   (`info`, `debug`, `tim=debug,sqlx=warn`).
 - `TIM_CONFIG` — path to the config file (alternative to `--config`).
+- `TIM_OFFLINE` — see below.
 
 There are no undocumented env vars.
 
@@ -239,6 +242,23 @@ Required env vars in a typical production deployment:
 | `TIM_ADMIN_TOKEN` | Admin token for privileged endpoints. |
 | `TIM_SESSION_ENCRYPTION_KEY` | Only when `session_store: "postgres"`. |
 | `TIM_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET` | One pair per OAuth2 provider. |
+| `TIM_INTROSPECT_<CALLER>_SECRET` | One per introspection client (see above). |
+
+### `TIM_OFFLINE` — pentest / break-test gate
+
+Set `TIM_OFFLINE=1` (or `true`, `yes`) to make every outbound HTTP
+call refuse with 502 instead of hitting the network. Intended for
+pentest engagements, adversarial CI, and any environment where TIM
+must NOT accidentally reach a real upstream IdP:
+
+- OIDC discovery (`GET .well-known/openid-configuration`)
+- JWKS fetch (`GET jwks_uri`)
+- Token exchange (`POST token_endpoint`)
+
+Boot emits a WARN naming the flag so operators see the posture in
+the log stream. Value is snapshotted at first read; changing it
+mid-run has no effect. Not a config field — env-only so a CI job
+doesn't have to touch operator `tim.yaml`.
 
 ## Sample production overrides
 
