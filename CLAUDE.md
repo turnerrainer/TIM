@@ -173,7 +173,10 @@ Beyond the `_env` fields in `tim.yaml`:
   CHANGELOG was the *only* real conflict in 6 of 7 rebase cycles.
   If you're helping plan a future batch, propose deferring CHANGELOG
   entries to a single release-notes PR.
-- Base branch: `dev`. `main` is release-only.
+- Base branch: `dev`. `dev` doubles as the release branch (`main`
+  is unused — historical convention that CLAUDE.md previously called
+  "release-only" was retired when the release pipeline moved to
+  `dev`-triggered auto-tag; see `.github/workflows/auto-tag-on-dev.yml`).
 - Force-push to PR branches is expected for rebase-on-conflict
   workflows. Use `--force-with-lease` with the current remote SHA.
 
@@ -290,8 +293,12 @@ new shape.
   being told. The maintainer cuts releases.
 - **Never edit an already-released migration file.** Add a new
   one instead.
-- **Never modify `main`.** It is release-only, pushed to by tag
-  merges of release branches.
+- **Never push to `dev` outside a merged PR.** `dev` is the
+  release branch (auto-tag + publish fires on every push to
+  `dev` that bumps `Cargo.toml`); a direct push bypasses review
+  AND could trigger a container publish.
+- **Never modify `main`.** The `main` branch is unused today; do
+  not push, tag, or open a PR against it.
 - **Never force-push a branch that has already been merged.**
 
 If a change would require its own `### Upgrading from …` entry

@@ -1,28 +1,36 @@
-name: auto-tag-on-main
+name: auto-tag-on-dev
 
-# Push to `main` = release. Read the version from Cargo.toml and, if a
-# matching `v<version>` tag doesn't yet exist, create it AND explicitly
-# dispatch `publish.yml` against it. The tag build + push happens under
-# the default `GITHUB_TOKEN`, whose git-pushes intentionally do NOT
-# trigger other workflows (a GHA safety default against recursion).
-# Explicit `gh workflow run` bridges that gap so "merge to main = image
-# published" holds end-to-end.
+# TIM's release convention is `dev` = the release branch (`main` is
+# unused). Every push to `dev` — merge of a feature PR, release PR, or
+# fix-up commit — passes through this workflow:
 #
-# Idempotent: re-running (or force-pushing main) does nothing when the
-# tag already exists. Publish itself is gated by the immutable
+#   1. Read the version from Cargo.toml.
+#   2. If a `v<version>` tag does NOT yet exist on the remote, create
+#      it AND explicitly dispatch `publish.yml` against it.
+#   3. If the tag DOES exist (the common case — most `dev` merges do
+#      not bump the version), no-op.
+#
+# Effect: only version-bumping merges (the release PRs) trigger a
+# publish. Every feature-fix merge on `dev` is a cheap tag-exists
+# check.
+#
+# Why the explicit dispatch step: git-pushes made under the default
+# `GITHUB_TOKEN` intentionally do NOT trigger downstream workflows
+# (GHA safety default against recursion). Explicit `gh workflow run`
+# bridges that gap so "merge release PR = image published" holds
+# end-to-end.
+#
+# Idempotent: re-running (or force-pushing `dev`) does nothing when
+# the tag already exists. Publish itself is gated by the immutable
 # `v<version>` naming; you cannot accidentally re-publish a released
 # version without deleting the tag first.
-#
-# `main` is release-only per CLAUDE.md convention. This workflow does
-# not attempt to validate that; it just does its one job whenever main
-# advances.
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
 
 concurrency:
-  group: auto-tag-main
+  group: auto-tag-dev
   cancel-in-progress: false
 
 # `contents: write` — create + push the tag.
@@ -35,7 +43,7 @@ jobs:
   tag-and-dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
+      - name: Checkout dev
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -76,7 +84,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "Release ${TAG} (auto-tagged from main)"
+          git tag -a "${TAG}" -m "Release ${TAG} (auto-tagged from dev)"
           git push origin "${TAG}"
           echo "Pushed ${TAG}."
 
