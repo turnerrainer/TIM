@@ -22,6 +22,7 @@ impl Audience {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenerateRequest {
     #[serde(rename = "JWTName", alias = "jwt_name")]
     pub jwt_name: String,
@@ -43,6 +44,7 @@ pub struct TokenResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValidateRequest {
     pub token: String,
     #[serde(default)]
@@ -68,6 +70,7 @@ pub struct ValidateResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExtendRequest {
     pub token: String,
     #[serde(
@@ -81,6 +84,7 @@ pub struct ExtendRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BulkRevokeRequest {
     pub tokens: Vec<String>,
     #[serde(default)]
@@ -109,6 +113,7 @@ pub struct BulkRevokeItem {
 /// The response exposes both `page/size/totalPages` (JVM shape) AND
 /// `offset/limit` (row shape) so no client is stranded.
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ListRequest {
     /// Page number in JVM mode; row offset when `by_row = true`.
     #[serde(default)]

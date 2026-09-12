@@ -53,6 +53,7 @@ impl IntrospectionResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IntrospectRequest {
     pub token: String,
     #[serde(default)]
