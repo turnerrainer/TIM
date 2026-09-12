@@ -185,6 +185,84 @@ front: nginx `limit_req`, envoy `local_ratelimit`, cloud WAF, etc.
 The admin-gated endpoints are the primary abuse targets; validate
 and userinfo are relatively cheap but still worth capping.
 
+## Pre-boot validation — `tim doctor`
+
+Every deploy should run `tim doctor` before restarting the service.
+The subcommand parses `tim.yaml`, resolves every referenced env var
+(admin token, database URL, session encryption key, provider
+credentials, introspection client secrets), verifies the JWT key
+file exists and parses as PKCS#8 PEM, and prints a structured
+PASS / WARN / FAIL table. It never binds a port, never opens a
+Postgres connection, never touches the network — safe to run in
+locked-down CI.
+
+```console
+$ tim doctor
+[  OK  ] config: loaded from /etc/tim/tim.yaml
+[  OK  ] config: validate: all cross-field checks pass
+[  OK  ] jwt.private_key: parsed OK from /etc/secrets/tim/jwt-private.pem (kid=prod-2026-01)
+[  OK  ] database.url_env: `TIM_DATABASE_URL` resolved to a non-empty value
+[  OK  ] security.admin_token_env: `TIM_ADMIN_TOKEN` resolved (require_admin_token = true)
+[  OK  ] introspection.clients: client[ruuter].client_secret_env `TIM_INTROSPECT_RUUTER_SECRET` resolved
+[ WARN ] jwt.audience: validation_enabled = false — every caller can request any audience.
+---
+Summary: 6 pass, 1 warn, 0 fail (total 7)
+```
+
+Exit codes: `0` on all-pass (WARN advisory), `1` on any FAIL or
+(under `--strict`) any WARN, `2` on doctor itself failing. Wire
+into deploy pipelines as a pre-flight gate:
+
+```bash
+tim doctor --strict || { echo "config unsafe, refusing deploy"; exit 1; }
+```
+
+## Offline mode — `TIM_OFFLINE=1`
+
+For pentest engagements, adversarial CI, or any environment where
+TIM must NOT accidentally reach a real upstream IdP: set
+`TIM_OFFLINE=1` and every outbound HTTP call (discovery, JWKS,
+token exchange) refuses with 502 instead of hitting the network.
+Boot emits a WARN so operators see the flag in the log. Env-only
+knob, snapshotted at first read; changing it mid-run has no
+effect.
+
+## W3C Trace Context — every response carries `traceparent`
+
+TIM emits `traceparent: 00-<32-hex trace-id>-<16-hex span-id>-<2-hex flags>`
+and `x-trace-id: <32-hex trace-id>` on every response, including
+4xx and 5xx. When a request arrives with a well-formed incoming
+`traceparent` (typically from Ruuter, the fleet reverse proxy),
+TIM echoes the caller's trace-id and preserves their sampling
+decision (flags). Span-id is always fresh — TIM is a new span
+within the (possibly-inherited) trace.
+
+Downstream tooling can correlate a specific TIM response with
+TIM's log line by grepping the trace-id; the access-log line that
+names the request carries the same value:
+
+```
+INFO http_request_completed method=POST route=/introspect
+     status=200 duration_us=1234 trace_id=<same 32-hex value>
+```
+
+## Strict request schemas — `#[serde(deny_unknown_fields)]`
+
+Every modern JSON body / form / query DTO carries
+`#[serde(deny_unknown_fields)]`. A caller sending
+`{"token":"x","admin_override":true}` gets 4xx with the offending
+field named, instead of the extra field being silently dropped.
+Applies to:
+
+- `POST /jwt/custom/{generate,validate,extend,revoke,revoke/bulk,list/me}`
+- `POST /introspect` (both JSON and form-encoded)
+- `POST /auth/logout` (body), `GET /auth/login/:id` (query)
+
+Deliberately exempt (compat / IdP-driven surfaces): JVM 1.x compat
+endpoints, `GET /auth/callback/:id` (IdPs add per-request params
+per RFC 6749), and IdP response DTOs (discovery, JWKS, token
+response).
+
 ## Threat model summary
 
 | Attacker capability | Protection |
