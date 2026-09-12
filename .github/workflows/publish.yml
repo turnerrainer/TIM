@@ -246,23 +246,30 @@ jobs:
 
       # Create the GitHub Release entry for this tag if one doesn't
       # already exist. Body = the matching CHANGELOG.md section
-      # extracted by a simple sed-between-headings. Stable tags are
-      # marked `--latest`; pre-release tags (`-alpha`, `-beta`,
-      # `-rc`, ...) are marked `--prerelease` and are NOT elected
-      # Latest — casual visitors to the Releases page and consumers
-      # of the GitHub "latest release" API keep pointing at the
-      # newest stable rather than being pulled forward onto an
-      # unfinished pre-release. Skipped cleanly when the release
-      # already exists (backfilled by hand, re-runs, etc.).
+      # extracted by a simple sed-between-headings.
       #
-      # Runs AFTER Trivy + smoke tests so a Release entry only
-      # exists for a working image.
+      # Every published tag becomes `--latest` — including the
+      # pre-1.0 alpha stream. GitHub API forbids the
+      # `--prerelease` + `--latest` combination ("Latest release
+      # cannot be draft or prerelease"), and hiding pre-releases
+      # from the Latest slot would leave the repo homepage empty
+      # for the entire pre-1.0 lifetime (TIM has no stable release
+      # yet). The `-alpha` / `-beta` / `-rc` suffix in the tag name
+      # is the pre-release signal for humans; the `--prerelease`
+      # API flag is reserved for the special case of a tag that
+      # should NOT be visible on the homepage even though it's the
+      # newest thing published (e.g. an experimental fork). If you
+      # need that, drop this workflow step and mark manually via
+      # `gh release edit`.
+      #
+      # Skipped cleanly when the release already exists (backfilled
+      # by hand, re-runs, etc.). Runs AFTER Trivy + smoke tests so
+      # a Release entry only exists for a working image.
       - name: Create or refresh GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_REF: ${{ github.event.inputs.tag || github.ref_name }}
           VERSION: ${{ steps.meta.outputs.version }}
-          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
           set -euo pipefail
           if gh release view "${TAG_REF}" >/dev/null 2>&1; then
@@ -284,23 +291,10 @@ jobs:
             printf 'Container images:\n- `docker pull turnerrainer/tim:%s`\n- `docker pull ghcr.io/turnerrainer/tim:%s`\n' \
                    "${VERSION}" "${VERSION}" > "${notes_file}"
           fi
-          # Two shapes, mutually exclusive: stable → --latest,
-          # pre-release → --prerelease + --latest=false. `gh release
-          # create` refuses to combine `--latest` with `--prerelease`,
-          # and its default without either flag is server-side
-          # heuristics we don't want to depend on.
-          if [ "${PRERELEASE}" = "true" ]; then
-            gh release create "${TAG_REF}" \
-                --title "${TAG_REF}" \
-                --notes-file "${notes_file}" \
-                --prerelease \
-                --latest=false
-          else
-            gh release create "${TAG_REF}" \
-                --title "${TAG_REF}" \
-                --notes-file "${notes_file}" \
-                --latest
-          fi
+          gh release create "${TAG_REF}" \
+              --title "${TAG_REF}" \
+              --notes-file "${notes_file}" \
+              --latest
           rm -f "${notes_file}"
 
       - name: Install cosign
