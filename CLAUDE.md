@@ -111,6 +111,127 @@ Postgres schema and coordinate via an advisory lock in
 - Force-push to PR branches is expected for rebase-on-conflict
   workflows. Use `--force-with-lease` with the current remote SHA.
 
+## Shipping a breaking change
+
+TIM is pre-1.0 (alpha). "Breaking" is a strict category —
+anything that requires an operator to touch config, upgrade
+downstream callers, or run a manual step. Everything else is
+non-breaking, no matter what the release notes say.
+
+### What counts as breaking
+
+- Flipping a default that changes wire behaviour operators may be
+  relying on. Example: `introspection.required_client_auth`
+  `false → true` (audit FN1, deferred for 0.4.0-alpha) —
+  every unauth `/introspect` request begins returning 401.
+- Adding, renaming, or removing a field in a
+  `#[serde(deny_unknown_fields)]` config struct such that a
+  previously-valid `tim.yaml` no longer parses. Renaming should
+  keep the old name via `#[serde(alias = "old_name")]` for one
+  release before removal.
+- Removing an HTTP endpoint, renaming a response body field,
+  or flipping a status code for the same input (finding 16:
+  `/jwt/custom/validate` went `200 → 401` on invalid tokens for
+  JVM parity — breaking for anyone who was reading status).
+- A new required env var, or a new config field without a
+  `#[serde(default)]`.
+- Any migration that alters an already-released schema in place
+  (see migration rules below — avoid via additive-then-tighten).
+
+### What does NOT count as breaking
+
+- New endpoint, new response field, new optional config field
+  with a default. Log under `### Added` in CHANGELOG.
+- Fixing a bug so the wrong status now returns the right one, if
+  no external contract was documenting the old behaviour. Log
+  under `### Fixed`; not `### Upgrading`.
+- Internal refactor with no wire-visible effect.
+
+### Where the version bump happens
+
+Version lives in three tracked files that must move together:
+
+- `Cargo.toml` line 3 (`version = "..."`)
+- `Cargo.lock` — regenerate with `cargo build`, do not edit by hand
+- `VERSION` — top-level, one line
+
+For an alpha, the bump is `0.X.0-alpha → 0.(X+1).0-alpha`. We do
+not do patch bumps during alpha; every batch is a minor.
+
+### CHANGELOG discipline
+
+`CHANGELOG.md` is canonical; `book/src/reference/changelog.md`
+mirrors it byte-for-byte (see "Docs" bullet at the top of this
+file). Per-PR entries land under `## [Unreleased]` in one of
+`### Added`, `### Changed`, `### Removed`, `### Fixed`,
+`### Security`. Mark breaking entries with `**BREAKING**` at the
+start of the line.
+
+At release cut:
+
+1. Roll `[Unreleased]` into a dated version header
+   `## [0.X.0-alpha] — YYYY-MM-DD`.
+2. Add `### Upgrading from 0.(X-1).y-alpha` immediately below,
+   listing every default that flipped, every config field that
+   must change, every migration that must run, every downstream
+   that must be re-configured. This section is the operator's
+   punch list — it is not optional.
+3. Copy the top-level file byte-for-byte over
+   `book/src/reference/changelog.md`.
+
+### Migrations
+
+`migrations/` is sqlx-managed and applied at startup when
+`database.auto_migrate: true`. **Every already-released migration
+is immutable.** Never edit `migrations/0001_init.sql` or any
+subsequent released file. Always add a new file with the next
+number.
+
+For schema shifts driven by a breaking change:
+
+- Additive first — new column NULLable or with a `DEFAULT` so
+  the previous code version can still write to the table.
+- Then a code deploy that reads/writes the new shape.
+- Then a later migration that tightens (NOT NULL, drop old
+  column) once operators have deployed the intermediate version.
+
+Never destructive-in-place in the same migration that adds the
+new shape.
+
+### PR + branch shape for a breaking change
+
+- Branch name: `fix/<slug>` for a fix-shaped break (rare —
+  usually a security default flip), `feat/<slug>` for a
+  feature-shaped break, `breaking/<slug>` when the break itself
+  is the point.
+- **One breaking change per PR.** Never bundle two breaks; the
+  operator's upgrade decision has to be atomic.
+- PR body must include an `## Upgrading` section written from
+  the operator's point of view. At release time the reviewer
+  copy-pastes it into CHANGELOG.md `### Upgrading from …` —
+  that copy-paste is the handoff.
+- Base branch: `dev`. Do not push the version-bump commit on
+  the fix branch itself. Version bumps live on
+  `release/X.Y.Z-alpha`, which batches merged fix branches once
+  the batch is ready.
+
+### What an LLM must NOT do autonomously
+
+- **Never flip a default without an explicit ask**, even when a
+  finding says "flip in the next minor." Version bumps are a
+  human decision.
+- **Never create a `release/X.Y.Z-alpha` branch or tag** without
+  being told. The maintainer cuts releases.
+- **Never edit an already-released migration file.** Add a new
+  one instead.
+- **Never modify `main`.** It is release-only, pushed to by tag
+  merges of release branches.
+- **Never force-push a branch that has already been merged.**
+
+If a change would require its own `### Upgrading from …` entry
+in the CHANGELOG, treat it as breaking. Escalate to the
+maintainer instead of shipping it.
+
 ## Where to look for context
 
 - `CHANGELOG.md` — canonical history, including 0.3.0-alpha
