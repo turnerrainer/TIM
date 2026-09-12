@@ -38,6 +38,9 @@ async fn setup() -> Option<axum::Router> {
     cfg.security.admin_token_env = ADMIN_ENV.into();
     std::env::set_var(ADMIN_ENV, ADMIN_VAL);
     cfg.oauth2.session_sweep_interval_seconds = 0;
+    // 0.4.0-alpha (FN1): introspection default is now on; this test
+    // does not exercise it — opt out explicitly.
+    cfg.introspection.required_client_auth = false;
 
     let pool = db::connect(&db_url, &cfg.database).await.ok()?;
     db::run_migrations(&pool).await.ok()?;

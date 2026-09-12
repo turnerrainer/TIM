@@ -176,23 +176,41 @@ impl Default for TokenValidationConfig {
     }
 }
 
-/// Optional client authentication for `POST /introspect`.
+/// Client authentication for `POST /introspect` (RFC 7662 §2.1).
 ///
-/// RFC 7662 §2.1 recommends that the introspection endpoint reject
-/// unauthenticated requests. TIM defaults to `required_client_auth =
-/// false` for backwards compatibility with existing downstream
-/// callers, but public deployments SHOULD set it to `true` and list
-/// the callers that are allowed to introspect.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+/// **BREAKING in 0.4.0-alpha (audit FN1)** — default flipped from
+/// `false` to `true`. Deployments that used to accept unauthenticated
+/// introspection now refuse; add an `introspection.clients` entry
+/// per downstream caller AND provision the referenced `_env` values,
+/// OR set `required_client_auth: false` explicitly to opt back out.
+///
+/// The permissive default was retained through 0.3.0-alpha for the
+/// v0.2.x → v0.3.0 upgrade window with a boot WARN. That window is
+/// now closed; RFC 7662 §2.1 recommends client auth on public
+/// deployments and pre-1.0 is the right time to bake it in.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntrospectionConfig {
-    #[serde(default)]
+    #[serde(default = "default_required_client_auth")]
     pub required_client_auth: bool,
     /// Registered introspection clients. Each entry lists a
     /// `client_id` (compared plaintext) and the env var that carries
     /// the secret (resolved once at boot, compared with `subtle`).
     #[serde(default)]
     pub clients: Vec<IntrospectionClient>,
+}
+
+impl Default for IntrospectionConfig {
+    fn default() -> Self {
+        Self {
+            required_client_auth: default_required_client_auth(),
+            clients: Vec::new(),
+        }
+    }
+}
+
+fn default_required_client_auth() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -785,9 +803,24 @@ oauth2:
         assert!(c.validate().is_err());
     }
 
+    /// 0.4.0-alpha (FN1) — the fresh default posture requires
+    /// introspection client auth. Since `AppConfig::default()` has an
+    /// empty `clients` list, `validate()` REFUSES to accept it. The
+    /// dev / test path is to explicitly opt out.
     #[test]
-    fn validate_accepts_memory_default() {
+    fn validate_refuses_default_because_introspection_clients_empty() {
         let c = AppConfig::default();
+        let err = c.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("introspection.required_client_auth"),
+            "expected introspection error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_default_with_introspection_opt_out() {
+        let mut c = AppConfig::default();
+        c.introspection.required_client_auth = false;
         assert!(c.validate().is_ok());
     }
 
@@ -888,5 +921,24 @@ oauth2:
         assert!(!bind_is_loopback("2001:db8::1"));
         assert!(!bind_is_loopback("example.com"));
         assert!(!bind_is_loopback(""));
+    }
+
+    #[test]
+    fn validate_accepts_default_with_introspection_client_configured() {
+        let mut c = AppConfig::default();
+        c.introspection.clients.push(IntrospectionClient {
+            client_id: "downstream".into(),
+            client_secret_env: "SOME_ENV_VAR".into(),
+        });
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn defaults_include_required_introspection_auth() {
+        let c = AppConfig::default();
+        assert!(
+            c.introspection.required_client_auth,
+            "0.4.0-alpha: introspection auth is on by default (FN1)"
+        );
     }
 }
