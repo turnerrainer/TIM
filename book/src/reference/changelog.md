@@ -821,7 +821,8 @@ covering the endpoints enumerated in the design document.
   `no-new-privileges`, tmpfs `/tmp`, resource limits, healthcheck.
 - `deny.toml` + `.cargo/audit.toml`.
 
-[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.4.0-alpha...HEAD
+[Unreleased]: https://github.com/turnerrainer/TIM/compare/v0.4.1-alpha...HEAD
+[0.4.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.4.0-alpha...v0.4.1-alpha
 [0.4.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.3.0-alpha...v0.4.0-alpha
 [0.3.0-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.1-alpha...v0.3.0-alpha
 [0.2.1-alpha]: https://github.com/turnerrainer/TIM/compare/v0.2.0-alpha.2...v0.2.1-alpha
