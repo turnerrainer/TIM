@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   valid kid, HS256-signed-with-public-key, and every symmetric
   algorithm + `none` forging the signer's kid. All must resolve to
   `{"active": false}` — pins TIM's positive control against a future
-  regression that swaps in a permissive `Validation`. [h2ck.me v1
-  NEXT-TASKS T-8]
+  regression that swaps in a permissive `Validation`. (h2ck.me v1
+  NEXT-TASKS T-8)
 
 ## [0.4.0-alpha] - 2026-09-12
 
