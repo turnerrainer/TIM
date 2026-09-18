@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `oauth2::jwks::tests::concurrent_misses_coalesce_to_single_upstream_fetch`
   — 100 concurrent misses → 1 upstream hit. (h2ck.me v1 NEXT-TASKS
   T-4)
+- **Attacker-controlled fields clipped in error responses (AP-6).**
+  Provider IDs, OIDC callback `error` + `error_description`, id_token
+  parse errors, JWK decode errors, and `?jwt=` echoes are all clipped
+  to 256 characters via `error::clip_untrusted`. Bounds response
+  payload from a malformed input and caps downstream log-echo blast
+  radius. Regression pin: `tests/security_error_echo_clipped.rs`.
+  (h2ck.me v1 NEXT-TASKS T-18 / BREAK-TESTS-OWASP-PROBES-v1 AP-6)
 
 ### Changed
 

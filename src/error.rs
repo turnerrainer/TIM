@@ -104,3 +104,48 @@ impl IntoResponse for TimError {
 }
 
 pub type Result<T> = std::result::Result<T, TimError>;
+
+/// Clip an attacker-controlled string fragment before embedding it in
+/// an error response body or an outbound JSON echo. AP-6 recommendation
+/// (BREAK-TESTS-OWASP-PROBES-v1) — bounds response payload growth from
+/// a malformed request, and caps any downstream log-echo blast radius.
+///
+/// Adds an ellipsis (`…`) when the value was truncated so operators
+/// can distinguish "the input really was this short" from "we cut it."
+/// Iterates chars rather than bytes so we never split a UTF-8 sequence.
+pub fn clip_untrusted(s: &str, max_chars: usize) -> String {
+    let mut it = s.chars();
+    let head: String = it.by_ref().take(max_chars).collect();
+    if it.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clip_untrusted;
+
+    #[test]
+    fn under_cap_is_unchanged() {
+        assert_eq!(clip_untrusted("hello", 256), "hello");
+    }
+
+    #[test]
+    fn over_cap_is_clipped_with_ellipsis() {
+        let s = "x".repeat(300);
+        let out = clip_untrusted(&s, 256);
+        assert_eq!(out.chars().count(), 257); // 256 + ellipsis
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn utf8_multibyte_not_split() {
+        // 4-byte per char (emoji); 10 chars = 40 bytes.
+        let s: String = "🌟".repeat(10);
+        let out = clip_untrusted(&s, 5);
+        assert_eq!(out.chars().count(), 6); // 5 stars + ellipsis
+        assert!(out.starts_with("🌟🌟🌟🌟🌟"));
+    }
+}
