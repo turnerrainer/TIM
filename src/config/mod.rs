@@ -80,6 +80,35 @@ pub struct JwtConfig {
     /// `/jwt/custom-jwt-blacklist`, `/jwt/blacklist`, etc.
     #[serde(default = "default_cookie_name")]
     pub cookie_name: String,
+    /// Optional predecessor key still trusted for signature verification
+    /// during a rotation grace period. Signing always uses the current
+    /// key; verifiers accept either while `retires_at` is in the future.
+    /// After `retires_at`, the previous key is refused and dropped from
+    /// the JWKS response. See `book/src/how-to/rotate-signing-key.md`.
+    /// BREAK-TESTS-OWASP-PROBES-v1 F-PR-3.
+    #[serde(default)]
+    pub previous_key: Option<PreviousKeyConfig>,
+    /// Days-before-retirement window at which boot emits a WARN that
+    /// the previous key is approaching its cliff. Default 7. Lets
+    /// operators plan the next rotation without watching the calendar.
+    #[serde(default = "default_rotation_warn_days")]
+    pub rotation_warn_days: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviousKeyConfig {
+    /// PKCS#8 PEM path of the retiring signing key. Same format as
+    /// `jwt.private_key_path`.
+    pub private_key_path: PathBuf,
+    /// JWKS `kid` under which this key was advertised. Must differ from
+    /// the current `jwt.key_id` so downstream verifiers can distinguish
+    /// tokens.
+    pub key_id: String,
+    /// Instant (RFC 3339, e.g. `2027-01-15T00:00:00Z`) past which the
+    /// previous key is no longer accepted. Emitted in JWKS only while
+    /// `retires_at > now`.
+    pub retires_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -334,6 +363,8 @@ impl Default for JwtConfig {
             max_claims_bytes: default_max_claims_bytes(),
             bulk_revoke_max: default_bulk_revoke_max(),
             cookie_name: default_cookie_name(),
+            previous_key: None,
+            rotation_warn_days: default_rotation_warn_days(),
         }
     }
 }
@@ -441,6 +472,24 @@ impl AppConfig {
                  (see security-hardening.md)"
             );
         }
+        // Rotation grace period sanity: previous kid must differ from
+        // current so JWKS downstream can distinguish, and the retirement
+        // window must not be so far in the future that operators are
+        // signalling "never retire" via a lazy `2099-` timestamp.
+        if let Some(prev) = &self.jwt.previous_key {
+            if prev.key_id.trim().is_empty() {
+                return Err(TimError::Config(
+                    "jwt.previous_key.key_id must be non-empty".into(),
+                ));
+            }
+            if prev.key_id == self.jwt.key_id {
+                return Err(TimError::Config(format!(
+                    "jwt.previous_key.key_id (`{}`) must differ from jwt.key_id \
+                     so downstream JWKS verifiers can distinguish the two keys",
+                    prev.key_id
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -503,6 +552,14 @@ impl AppConfig {
             warn!(target: "tim::config::diagnose",
                 "jwt.issuer = \"localhost\" — downstream introspection will refuse \
                  unless it expects this issuer.");
+        }
+        if let Some(prev) = &self.jwt.previous_key {
+            info!(target: "tim::config::diagnose",
+                previous_key_path = %prev.private_key_path.display(),
+                previous_key_id = %prev.key_id,
+                previous_retires_at = %prev.retires_at,
+                rotation_warn_days = self.jwt.rotation_warn_days,
+                "jwt.previous_key (rotation grace period)");
         }
 
         // security
@@ -724,6 +781,9 @@ fn default_bulk_revoke_max() -> usize {
 }
 fn default_cookie_name() -> String {
     "jwt".into()
+}
+fn default_rotation_warn_days() -> u32 {
+    7
 }
 fn default_session_store() -> String {
     "memory".into()

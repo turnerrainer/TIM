@@ -42,6 +42,36 @@ after a PgBouncer bounce is refreshed transparently.
 | `jwt.max_claims_bytes` | usize | `32768` | Cap on custom claim payload size at generate time. |
 | `jwt.bulk_revoke_max` | usize | `100` | Max tokens per `/jwt/custom/revoke/bulk` call. |
 | `jwt.cookie_name` | string | `"jwt"` | Cookie name used by the legacy compat endpoints. |
+| `jwt.rotation_warn_days` | u32 | `7` | Days-before-retirement window at which boot emits a WARN that the previous key is approaching its cliff. |
+| `jwt.previous_key` | object | (unset) | Optional predecessor key retained during a rotation grace period. Signing always uses the current key; verifiers accept either while `retires_at > now`. See "Rotating the JWT signing key" below. |
+
+### `jwt.previous_key`
+
+Set together with `jwt.private_key_path` when rotating the JWT signing
+key. All three fields are required when the block is present.
+
+| Field | Type | Description |
+|---|---|---|
+| `.private_key_path` | path | PKCS#8 PEM path of the retiring key. |
+| `.key_id` | string | `kid` under which the retiring key was advertised. MUST differ from `jwt.key_id`. |
+| `.retires_at` | RFC 3339 | Instant past which the previous key is refused on verification and dropped from JWKS. |
+
+Rotation flow:
+
+1. Generate a new PKCS#8 PEM. Add `jwt.previous_key` pointing at the
+   OLD path + kid, set `retires_at` some days in the future (long
+   enough for every downstream verifier to refresh its JWKS cache).
+   Repoint `jwt.private_key_path` + `jwt.key_id` at the NEW key.
+2. Deploy TIM. `GET /jwt/keys/public` now returns both keys; all
+   in-flight tokens continue to verify. New signatures use the new
+   key.
+3. On or after `retires_at`, the previous key is no longer accepted
+   and is dropped from JWKS. Delete the `jwt.previous_key` block on
+   the next deploy to clean up.
+
+Boot emits WARN when `retires_at` is within `jwt.rotation_warn_days`
+days. `tim doctor` reports the same via a `jwt.previous_key` check
+row.
 
 ## `oauth2`
 
