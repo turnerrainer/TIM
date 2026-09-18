@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Docker runtime image switched to distroless** (h2ck.me v1
+  NEXT-TASKS T-12 / BREAK-TESTS-GAP-CLOSURE-v1 G1). The runtime
+  stage is now `gcr.io/distroless/cc-debian12:nonroot` instead of
+  `debian:13.6-slim`. Trivy `--severity HIGH,CRITICAL` count drops
+  from **65** (3 CRITICAL + 62 HIGH) on the old image to **0** on
+  the new one. Image size shrinks from 119 MB to 32 MB. No shell,
+  no package manager, no `curl`, no `useradd`. Ships as
+  `USER nonroot:nonroot` (UID 65532). Dropped `tini`: TIM is a
+  single-process axum server, no children to reap; K8s or
+  `docker run --init` cover PID-1 signal forwarding if needed.
+
 ### Security
 
 - **Slow-body Slowloris probe (T-15).** Verified that
@@ -19,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BREAK-TESTS-SUMMARY-v1 §Universal residuals #5)
 
 ### Added
+
+- **`tim healthcheck` subcommand.** Probes `/health` via `reqwest`
+  and exits 0 on 200 / 1 otherwise. Wired as the docker-compose
+  `HEALTHCHECK` on the distroless image (which has no `curl` / shell
+  for `CMD-SHELL`). `--url` overrides the default
+  `http://127.0.0.1:<server.port>/health`; `--timeout-seconds`
+  bounds the probe (default 5s). (h2ck.me v1 NEXT-TASKS T-12)
 
 - `jwt.previous_key` config block — signing-key rotation with a grace
   period during which JWKS emits both keys and `/introspect` accepts

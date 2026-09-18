@@ -58,7 +58,9 @@ services:
         reservations:
           memory: 128M
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8085/health"]
+      # Distroless base image (h2ck.me v1 T-12) has no curl / shell.
+      # `tim healthcheck` probes /health via reqwest and exits 0/1.
+      test: ["CMD", "/app/tim", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
