@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/security_slow_body_timeout.rs` — 8s trickle against a 2s
   timeout completes in ~2s. (h2ck.me v1 NEXT-TASKS T-15 /
   BREAK-TESTS-SUMMARY-v1 §Universal residuals #5)
+- **Admin-surface audit (T-19).** Enumerated every route in
+  `src/router/mod.rs::build_router` and confirmed no accidental public
+  exposure: every mutating endpoint runs behind `AdminAuth`, every
+  session-scoped read behind `SessionAuth`, the seven public-by-design
+  endpoints are all protocol-required (health probes, JWKS, OAuth
+  flow endpoints, RFC 7662 discovery). Regression pin:
+  `tests/security_admin_surface_audit.rs` — 5 cases pinning the
+  admin / bearer / session / cookie gates AND that documented-public
+  routes do NOT 401 (mirror invariant). Book updated: `Endpoint auth
+  invariants` section in `book/src/security-hardening.md`. Explicit
+  verdict: TIM does NOT adopt a Ruuter-style `/_/*` env-gated admin
+  surface — the current gating is comprehensive and adding `/_/*`
+  would offer attackers a distinct env-shape to probe without
+  security benefit. (h2ck.me v1 NEXT-TASKS T-19)
 
 ### Added
 
