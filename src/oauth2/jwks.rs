@@ -47,34 +47,70 @@ impl JwksCache {
     /// Fetch (or return cached) JWKS. Errors on any network / parse
     /// problem — the caller (`idtoken::verify`) will refuse the token
     /// rather than proceed without validation.
+    ///
+    /// Single-flight: concurrent misses on the same `jwks_uri` share
+    /// one upstream request via Moka's `try_get_with`. Prevents the
+    /// thundering-herd shape where N parallel token verifications after
+    /// a cache eviction all hammer the JWKS endpoint (2026-09-17
+    /// concurrency mini-audit R-3).
     pub async fn fetch(&self, jwks_uri: &str) -> Result<SharedJwks> {
-        if let Some(cached) = self.cache.get(jwks_uri).await {
-            return Ok(cached);
-        }
-        // Fleet §9.1: TIM_OFFLINE=1 short-circuits every outbound.
-        if let Some(e) = crate::http::block_if_offline(jwks_uri) {
-            return Err(e);
-        }
-        let resp = self
-            .http
-            .get(jwks_uri)
-            .send()
+        let http = self.http.clone();
+        let uri = jwks_uri.to_string();
+        self.cache
+            .try_get_with(uri.clone(), async move { load(&http, &uri).await })
             .await
-            .map_err(|e| TimError::BadGateway(format!("JWKS fetch: {e}")))?;
-        if !resp.status().is_success() {
-            return Err(TimError::BadGateway(format!(
-                "JWKS endpoint returned {}",
-                resp.status()
-            )));
-        }
-        let body: JwksBody = resp
-            .json()
-            .await
-            .map_err(|e| TimError::BadGateway(format!("JWKS parse: {e}")))?;
-        let set = Arc::new(body.into_jwk_set());
-        self.cache.insert(jwks_uri.to_string(), set.clone()).await;
-        Ok(set)
+            .map_err(LoaderErr::into_tim_error)
     }
+}
+
+/// The error type surfaced by the single-flight loader. Wrapping in an
+/// enum (rather than collapsing to `String`) preserves the distinction
+/// between `TIM_OFFLINE` refusals (mapped to `UpstreamTimeout`, gateway-
+/// timeout status) and upstream failures (`BadGateway`). Moka returns
+/// `Arc<E>` from `try_get_with`, so `E` cannot be `TimError` directly
+/// (`TimError` is not `Clone`); the intermediate enum lets us round-trip
+/// the variant losslessly.
+#[derive(Debug)]
+enum LoaderErr {
+    Offline(String),
+    BadGateway(String),
+}
+
+impl LoaderErr {
+    fn into_tim_error(arc: Arc<Self>) -> TimError {
+        match &*arc {
+            LoaderErr::Offline(msg) => TimError::UpstreamTimeout(msg.clone()),
+            LoaderErr::BadGateway(msg) => TimError::BadGateway(msg.clone()),
+        }
+    }
+}
+
+/// Perform the actual JWKS fetch. Called exactly once per single-flight
+/// group under `try_get_with`; concurrent misses share this future.
+async fn load(
+    http: &reqwest::Client,
+    jwks_uri: &str,
+) -> std::result::Result<SharedJwks, LoaderErr> {
+    // Fleet §9.1: TIM_OFFLINE=1 short-circuits every outbound.
+    if let Some(TimError::UpstreamTimeout(msg)) = crate::http::block_if_offline(jwks_uri) {
+        return Err(LoaderErr::Offline(msg));
+    }
+    let resp = http
+        .get(jwks_uri)
+        .send()
+        .await
+        .map_err(|e| LoaderErr::BadGateway(format!("JWKS fetch: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(LoaderErr::BadGateway(format!(
+            "JWKS endpoint returned {}",
+            resp.status()
+        )));
+    }
+    let body: JwksBody = resp
+        .json()
+        .await
+        .map_err(|e| LoaderErr::BadGateway(format!("JWKS parse: {e}")))?;
+    Ok(Arc::new(body.into_jwk_set()))
 }
 
 /// We deserialise via a minimal owned wrapper because `jsonwebtoken`'s
@@ -151,6 +187,55 @@ mod tests {
         let url = format!("{}/jwks", server.url());
         let _ = cache.fetch(&url).await.unwrap();
         let _ = cache.fetch(&url).await.unwrap();
+        m.assert_async().await;
+    }
+
+    /// 2026-09-17 concurrency mini-audit R-3 regression pin.
+    ///
+    /// N concurrent misses on the same `jwks_uri` must coalesce to
+    /// exactly one upstream fetch. The previous `get()` + `insert()`
+    /// pattern raced: two tasks could each observe a cache miss, each
+    /// fetch, and the second `insert()` would overwrite the first —
+    /// wasting the upstream call and burning rate-limit budget.
+    #[tokio::test]
+    async fn concurrent_misses_coalesce_to_single_upstream_fetch() {
+        let mut server = mockito::Server::new_async().await;
+        // Introduce artificial latency so all 100 tasks are guaranteed
+        // to hit the same in-flight window; without it, a fast local
+        // mock might complete before the second task's `get()` lands.
+        let body =
+            r#"{"keys":[{"kty":"RSA","kid":"k","use":"sig","alg":"RS256","n":"AQAB","e":"AQAB"}]}"#;
+        let m = server
+            .mock("GET", "/jwks")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .with_chunked_body(move |w| {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                w.write_all(body.as_bytes())
+            })
+            // The whole point: exactly one upstream call for N callers.
+            .expect(1)
+            .create_async()
+            .await;
+
+        let cache = JwksCache::new(60);
+        let url = format!("{}/jwks", server.url());
+
+        let mut set = tokio::task::JoinSet::new();
+        for _ in 0..100 {
+            let c = cache.clone();
+            let u = url.clone();
+            set.spawn(async move { c.fetch(&u).await });
+        }
+        let mut ok = 0usize;
+        while let Some(res) = set.join_next().await {
+            let inner = res.expect("join");
+            let jwks = inner.expect("fetch");
+            assert_eq!(jwks.keys.len(), 1);
+            ok += 1;
+        }
+        assert_eq!(ok, 100, "all callers must receive the same JWKS");
         m.assert_async().await;
     }
 }
