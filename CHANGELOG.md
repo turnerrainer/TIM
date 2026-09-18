@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `.cargo/audit.toml` — reviewed `RUSTSEC-2023-0071` (rsa Marvin
+  timing) rationale. Confirmed TIM's session-at-rest encryption uses
+  ChaCha20-Poly1305 (not RSA), no `RsaPrivateKey::decrypt` call path
+  exists. Extended review date to 2027-03-18. (h2ck.me v1 NEXT-TASKS
+  T-13)
+
 ### Security
 
 - **JWT algorithm-confusion regression pins (G4).** New test file

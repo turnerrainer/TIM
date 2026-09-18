@@ -18,6 +18,8 @@ ignore = [
     # internally — the Marvin Attack surface is not reachable from
     # any TIM code path. Re-audit if TIM ever gains a code path
     # that calls `RsaPrivateKey::decrypt` or similar.
-    # Review: 2026-11-01
+    # Session-at-rest encryption uses ChaCha20-Poly1305 AEAD
+    # (`src/oauth2/session/crypto.rs`), not RSA.
+    # Reviewed: 2026-09-18. Next review: 2027-03-18.
     "RUSTSEC-2023-0071",
 ]
