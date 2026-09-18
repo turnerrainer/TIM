@@ -87,8 +87,14 @@ pub async fn verify(
 ) -> Result<Verified> {
     // Header + kid pass without touching claims. `decode_header` also
     // refuses `alg = none`.
-    let header = jsonwebtoken::decode_header(id_token)
-        .map_err(|e| TimError::Unprocessable(format!("id_token header: {e}")))?;
+    let header = jsonwebtoken::decode_header(id_token).map_err(|e| {
+        // AP-6: parse error may include a fragment of the attacker-
+        // supplied token; clip before echo.
+        TimError::Unprocessable(format!(
+            "id_token header: {}",
+            crate::error::clip_untrusted(&e.to_string(), 256)
+        ))
+    })?;
     if header.alg == Algorithm::HS256
         || header.alg == Algorithm::HS384
         || header.alg == Algorithm::HS512
@@ -105,7 +111,11 @@ pub async fn verify(
             .iter()
             .find(|k| k.common.key_id.as_deref() == Some(kid))
             .ok_or_else(|| {
-                TimError::Unprocessable(format!("id_token kid \"{kid}\" not in JWKS"))
+                // AP-6: attacker-controlled kid.
+                TimError::Unprocessable(format!(
+                    "id_token kid \"{}\" not in JWKS",
+                    crate::error::clip_untrusted(kid, 256)
+                ))
             })?,
         None => {
             // Fall back to first key matching alg — OIDC providers that
@@ -138,8 +148,14 @@ pub async fn verify(
     v.required_spec_claims.insert("sub".into());
     v.set_issuer(&[&discovery.issuer]);
 
-    let decoded = jsonwebtoken::decode::<IdTokenClaims>(id_token, &decoding, &v)
-        .map_err(|e| TimError::Unprocessable(format!("id_token verify: {e}")))?;
+    let decoded = jsonwebtoken::decode::<IdTokenClaims>(id_token, &decoding, &v).map_err(|e| {
+        // AP-6: verify error may include library-formatted fragments
+        // derived from the attacker-supplied token.
+        TimError::Unprocessable(format!(
+            "id_token verify: {}",
+            crate::error::clip_untrusted(&e.to_string(), 256)
+        ))
+    })?;
     let claims = decoded.claims;
 
     // aud MUST contain the client_id we authenticated with.
@@ -195,13 +211,29 @@ fn jwk_matches_alg(jwk: &Jwk, alg: Algorithm) -> bool {
 }
 
 fn decoding_key_for(jwk: &Jwk) -> Result<DecodingKey> {
+    // AP-6: the JWK originates from an upstream OIDC provider; while
+    // that upstream is trusted, its response body can still surface
+    // library-formatted error text whose length we shouldn't unbound
+    // into a response body.
     match &jwk.algorithm {
-        AlgorithmParameters::RSA(rsa) => DecodingKey::from_rsa_components(&rsa.n, &rsa.e)
-            .map_err(|e| TimError::Unprocessable(format!("JWK → RSA decoding key: {e}"))),
+        AlgorithmParameters::RSA(rsa) => {
+            DecodingKey::from_rsa_components(&rsa.n, &rsa.e).map_err(|e| {
+                TimError::Unprocessable(format!(
+                    "JWK → RSA decoding key: {}",
+                    crate::error::clip_untrusted(&e.to_string(), 256)
+                ))
+            })
+        }
         AlgorithmParameters::EllipticCurve(ec) => DecodingKey::from_ec_components(&ec.x, &ec.y)
-            .map_err(|e| TimError::Unprocessable(format!("JWK → EC decoding key: {e}"))),
+            .map_err(|e| {
+                TimError::Unprocessable(format!(
+                    "JWK → EC decoding key: {}",
+                    crate::error::clip_untrusted(&e.to_string(), 256)
+                ))
+            }),
         other => Err(TimError::Unprocessable(format!(
-            "unsupported JWK type: {other:?}"
+            "unsupported JWK type: {}",
+            crate::error::clip_untrusted(&format!("{other:?}"), 256)
         ))),
     }
 }

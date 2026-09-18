@@ -16,7 +16,11 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::AppConfig;
 use crate::crypto::JwtSigner;
-use crate::error::{Result, TimError};
+use crate::error::{clip_untrusted, Result, TimError};
+
+/// Cap for any attacker-controlled fragment echoed into an error
+/// response body. AP-6 (BREAK-TESTS-OWASP-PROBES-v1).
+const UNTRUSTED_ECHO_CAP: usize = 256;
 use crate::introspect::{IntrospectRequest, IntrospectionResponse, Introspector};
 use crate::jwt::api::*;
 use crate::jwt::service::JwtService;
@@ -366,11 +370,19 @@ async fn introspect_dispatch(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let req = if ct.starts_with("application/json") {
-        serde_json::from_slice::<IntrospectRequest>(&body)
-            .map_err(|e| TimError::BadRequest(format!("json parse: {e}")))?
+        serde_json::from_slice::<IntrospectRequest>(&body).map_err(|e| {
+            TimError::BadRequest(format!(
+                "json parse: {}",
+                clip_untrusted(&e.to_string(), UNTRUSTED_ECHO_CAP)
+            ))
+        })?
     } else if ct.starts_with("application/x-www-form-urlencoded") {
-        let f: IntrospectForm = serde_urlencoded::from_bytes(&body)
-            .map_err(|e| TimError::BadRequest(format!("form parse: {e}")))?;
+        let f: IntrospectForm = serde_urlencoded::from_bytes(&body).map_err(|e| {
+            TimError::BadRequest(format!(
+                "form parse: {}",
+                clip_untrusted(&e.to_string(), UNTRUSTED_ECHO_CAP)
+            ))
+        })?;
         IntrospectRequest {
             token: f.token,
             token_type_hint: f.token_type_hint,
@@ -415,10 +427,12 @@ async fn auth_provider_one(
     State(s): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
-    let p = s
-        .providers
-        .get(&id)
-        .ok_or_else(|| TimError::NotFound(format!("provider {id}")))?;
+    let p = s.providers.get(&id).ok_or_else(|| {
+        TimError::NotFound(format!(
+            "provider {}",
+            clip_untrusted(&id, UNTRUSTED_ECHO_CAP)
+        ))
+    })?;
     Ok(Json(json!({
         "id": p.id,
         "name": p.config.name,
@@ -439,10 +453,12 @@ async fn auth_login(
     Path(id): Path<String>,
     Query(q): Query<LoginQuery>,
 ) -> Result<Json<flow::AuthUrl>> {
-    let provider = s
-        .providers
-        .get(&id)
-        .ok_or_else(|| TimError::NotFound(format!("unknown provider {id}")))?;
+    let provider = s.providers.get(&id).ok_or_else(|| {
+        TimError::NotFound(format!(
+            "unknown provider {}",
+            clip_untrusted(&id, UNTRUSTED_ECHO_CAP)
+        ))
+    })?;
     let redirect_uri = flow::resolve_redirect_uri(
         &id,
         &provider.config.allowed_redirect_uris,
@@ -473,11 +489,16 @@ async fn auth_callback(
     Query(q): Query<CallbackQuery>,
 ) -> Result<Response> {
     if let Some(err) = q.error {
+        // AP-6: `error`, `error_description`, and the provider `id`
+        // are attacker-controlled (URL query + Path). Clip each before
+        // echo so a malformed callback can't inflate the response body.
         let body = json!({
             "status": "error",
-            "provider": id,
-            "error": err,
-            "error_description": q.error_description,
+            "provider": clip_untrusted(&id, UNTRUSTED_ECHO_CAP),
+            "error": clip_untrusted(&err, UNTRUSTED_ECHO_CAP),
+            "error_description": q.error_description
+                .as_deref()
+                .map(|d| clip_untrusted(d, UNTRUSTED_ECHO_CAP)),
         });
         return Ok((StatusCode::BAD_REQUEST, Json(body)).into_response());
     }
@@ -762,8 +783,10 @@ async fn jwt_blacklist_compat(
         };
     }
     if let Some(jwt_id) = q.jwt {
+        // AP-6: clip attacker-supplied `?jwt=<value>` before echo.
+        let clipped = clip_untrusted(&jwt_id, UNTRUSTED_ECHO_CAP);
         let jti = uuid::Uuid::parse_str(&jwt_id)
-            .map_err(|_| TimError::BadRequest(format!("?jwt=`{jwt_id}` is not a valid UUID")))?;
+            .map_err(|_| TimError::BadRequest(format!("?jwt=`{clipped}` is not a valid UUID")))?;
         return match s.jwt.revoke_by_jti(jti, q.reason).await? {
             Some(true) => Ok(status_body(StatusCode::OK, "blacklisted", None)),
             Some(false) => Ok(status_body(
@@ -774,7 +797,7 @@ async fn jwt_blacklist_compat(
             None => Ok(status_body(
                 StatusCode::NOT_FOUND,
                 "not_found",
-                Some(format!("no TIM-issued JWT with jti {jwt_id}")),
+                Some(format!("no TIM-issued JWT with jti {clipped}")),
             )),
         };
     }
