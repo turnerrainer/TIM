@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jwt.previous_key` config block — signing-key rotation with a grace
+  period during which JWKS emits both keys and `/introspect` accepts
+  tokens signed by either. Retirement instant is explicit
+  (`retires_at`, RFC 3339); after retirement the previous key is
+  dropped from JWKS and refused on verification. Boot + `tim doctor`
+  emit WARN when the retirement cliff is within
+  `jwt.rotation_warn_days` days (default 7). See
+  `book/src/security-hardening.md` §Key rotation. (h2ck.me v1
+  NEXT-TASKS T-7 / BREAK-TESTS-OWASP-PROBES-v1 F-PR-3)
+
 ### Fixed
 
 - **JWKS thundering herd (concurrency mini-audit R-3).**

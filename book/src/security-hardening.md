@@ -147,11 +147,55 @@ correctness — offered for operators who want the extra layer.
 ## Key rotation
 
 The JWT signing key is loaded once at startup from a PKCS#8 PEM file
-(`jwt.private_key_path`). To rotate:
+(`jwt.private_key_path`). Two rotation modes are supported:
+
+### Grace-period rotation (recommended)
+
+For a rotation that does not require every downstream verifier to
+refresh JWKS on the same second, configure `jwt.previous_key` alongside
+the new active key:
+
+```yaml
+jwt:
+  private_key_path: /opt/tim/keys/jwt-private-2027.pem
+  key_id: tim-rs-2
+  previous_key:
+    private_key_path: /opt/tim/keys/jwt-private-2026.pem
+    key_id: tim-rs-1
+    retires_at: "2027-01-15T00:00:00Z"
+  rotation_warn_days: 7        # boot WARN threshold, default 7
+```
+
+While `retires_at` is in the future:
+
+- `GET /jwt/keys/public` returns BOTH keys.
+- Newly signed tokens use `tim-rs-2` (the current key).
+- `POST /introspect` accepts tokens signed by either key.
+
+At or after `retires_at`, the previous key is refused on verification
+and dropped from JWKS. Remove the `jwt.previous_key` block on the next
+deploy to clean up.
+
+`tim doctor` reports the rotation state as a `jwt.previous_key` check
+row; boot emits WARN when the retirement cliff is within
+`jwt.rotation_warn_days` days. Fleet-strongholds row U22/U23: this
+grace-period mechanism is the runtime handshake that lets an operator
+adopt an HSM/KMS-backed key without a coordinated fleet cut-over.
+
+The legacy JVM 1.x `/jwt/verification-key` PEM endpoint always returns
+the CURRENT key only — its callers cannot pick between candidates. Any
+JVM consumer that needs multi-key support must migrate to
+`/jwt/keys/public` (JWKS).
+
+### Cold-swap rotation (legacy)
+
+If your downstream verifiers all refresh JWKS quickly and you can
+tolerate a brief window of "old-kid tokens" being refused:
 
 1. Generate a new PKCS#8 PEM keypair.
 2. Update `jwt.key_id` to a new value.
-3. Deploy a new TIM instance with the new key + new kid.
+3. Deploy a new TIM instance with the new key + new kid (no
+   `jwt.previous_key`).
 4. Verify `/jwt/keys/public` on the new instance advertises the new
    kid.
 5. Drain traffic from the old instance.

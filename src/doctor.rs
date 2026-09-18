@@ -183,6 +183,70 @@ pub fn run(config_path: Option<&Path>) -> Report {
         }
     }
 
+    // ---- JWT previous key (rotation grace period, F-PR-3) ------------
+    if let Some(prev) = &config.jwt.previous_key {
+        if prev.key_id == config.jwt.key_id {
+            r.push(Check::fail(
+                "jwt.previous_key",
+                format!(
+                    "key_id `{}` collides with jwt.key_id — must differ so JWKS \
+                     downstream can distinguish the two keys",
+                    prev.key_id
+                ),
+            ));
+        } else if !prev.private_key_path.exists() {
+            r.push(Check::fail(
+                "jwt.previous_key",
+                format!(
+                    "file not present at `{}` — remove `jwt.previous_key` \
+                     block if the previous key is no longer needed",
+                    prev.private_key_path.display()
+                ),
+            ));
+        } else {
+            match crate::crypto::JwtSigner::load_from_pem(
+                &prev.private_key_path,
+                prev.key_id.clone(),
+            ) {
+                Ok(_) => {
+                    let days_left = (prev.retires_at - chrono::Utc::now()).num_days();
+                    if days_left < 0 {
+                        r.push(Check::warn(
+                            "jwt.previous_key",
+                            format!(
+                                "kid={} retired {} day(s) ago; excluded from JWKS \
+                                 + refused on verification. Remove the block \
+                                 from tim.yaml to clear this WARN.",
+                                prev.key_id, -days_left
+                            ),
+                        ));
+                    } else if days_left as u32 <= config.jwt.rotation_warn_days {
+                        r.push(Check::warn(
+                            "jwt.previous_key",
+                            format!(
+                                "kid={} retires in {} day(s) (retires_at={}) — \
+                                 plan the next rotation.",
+                                prev.key_id, days_left, prev.retires_at
+                            ),
+                        ));
+                    } else {
+                        r.push(Check::pass(
+                            "jwt.previous_key",
+                            format!(
+                                "kid={} loaded; active until {} ({} day(s) left)",
+                                prev.key_id, prev.retires_at, days_left
+                            ),
+                        ));
+                    }
+                }
+                Err(e) => r.push(Check::fail(
+                    "jwt.previous_key",
+                    format!("parse from {}: {e}", prev.private_key_path.display()),
+                )),
+            }
+        }
+    }
+
     // ---- database URL env -------------------------------------------
     match std::env::var(&config.database.url_env) {
         Ok(v) if !v.is_empty() => r.push(Check::pass(

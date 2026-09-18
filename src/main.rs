@@ -107,6 +107,45 @@ async fn serve(config_path: Option<PathBuf>) -> Result<()> {
                 config.jwt.private_key_path.display()
             )
         })?;
+    let signer = if let Some(prev) = &config.jwt.previous_key {
+        let signer = signer
+            .load_previous_from_pem(&prev.private_key_path, prev.key_id.clone(), prev.retires_at)
+            .with_context(|| {
+                format!(
+                    "failed to load previous JWT key from {}",
+                    prev.private_key_path.display()
+                )
+            })?;
+        // Boot WARN when the retirement cliff is within the operator-
+        // configured window. Complements the JWKS shape by putting the
+        // clock-check into the boot log paragraph.
+        let days_left = (prev.retires_at - chrono::Utc::now()).num_days();
+        if days_left < 0 {
+            tracing::warn!(
+                previous_kid = %prev.key_id,
+                retires_at = %prev.retires_at,
+                "previous JWT signing key retired {} day(s) ago; still loaded but excluded from JWKS + refused on verification. Remove `jwt.previous_key` from tim.yaml to clear this WARN.",
+                -days_left,
+            );
+        } else if days_left as u32 <= config.jwt.rotation_warn_days {
+            tracing::warn!(
+                previous_kid = %prev.key_id,
+                retires_at = %prev.retires_at,
+                days_left,
+                "previous JWT signing key retires in {days_left} day(s). Plan the next rotation or drop `jwt.previous_key` before it cliffs.",
+            );
+        } else {
+            info!(
+                previous_kid = %prev.key_id,
+                retires_at = %prev.retires_at,
+                days_left,
+                "previous JWT signing key active during rotation grace period"
+            );
+        }
+        signer
+    } else {
+        signer
+    };
     info!(kid = %signer.kid(), "loaded RSA signing key");
 
     let db_url = std::env::var(&config.database.url_env).with_context(|| {
