@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Slow-body Slowloris probe (T-15).** Verified that
+  `tower_http::timeout::TimeoutLayer` bounds body-read too, not just
+  handler execution: a request that trickles bytes past
+  `server.request_timeout_seconds` is aborted at the configured
+  deadline. Not vulnerable, but pinned by a regression test at
+  `tests/security_slow_body_timeout.rs` — 8s trickle against a 2s
+  timeout completes in ~2s. (h2ck.me v1 NEXT-TASKS T-15 /
+  BREAK-TESTS-SUMMARY-v1 §Universal residuals #5)
+
 ### Added
 
 - `jwt.previous_key` config block — signing-key rotation with a grace

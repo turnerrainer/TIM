@@ -2428,6 +2428,7 @@ dependencies = [
  "chrono",
  "clap",
  "dashmap",
+ "futures-core",
  "jsonwebtoken",
  "mockito",
  "moka",
