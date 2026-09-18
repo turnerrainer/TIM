@@ -177,14 +177,33 @@ jobs:
 
           # Throwaway JWT signing key, valid PKCS#8 PEM. Both the
           # containing directory AND the file must be readable/
-          # traversable by uid 1000 (the container's `tim` user).
-          # `mktemp -d` defaults to mode 0700, which blocks the
-          # container user from even entering the dir — chmod both.
+          # traversable by the container user (UID 65532 on the
+          # distroless :nonroot base). `mktemp -d` defaults to
+          # mode 0700 which blocks the container user from even
+          # entering the dir — chmod both.
           key_dir="$(mktemp -d)"
           chmod 755 "${key_dir}"
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
             -out "${key_dir}/jwt-private.pem"
           chmod 644 "${key_dir}/jwt-private.pem"
+
+          # Smoke-only config override. The shipped tim.yaml has (since
+          # v0.4.0-alpha, audit FN1) `introspection.required_client_auth:
+          # true` + `introspection.clients: []` — startup refuses that
+          # combination (`AppConfig::validate()`). The smoke test only
+          # exercises `/health`, no `/introspect` traffic, so opting out
+          # of the client-auth gate is safe here. Bind-mounted over
+          # /app/tim.yaml so the shipped file is not modified.
+          smoke_yaml="$(mktemp --suffix=.yaml)"
+          chmod 644 "${smoke_yaml}"
+          # Written line-by-line (not heredoc) to keep the YAML column-0
+          # anchored regardless of workflow-file indentation.
+          {
+            echo 'security:'
+            echo '  admin_token_env: "TIM_ADMIN_TOKEN"'
+            echo 'introspection:'
+            echo '  required_client_auth: false'
+          } > "${smoke_yaml}"
 
           for platform in linux/amd64 linux/arm64; do
             echo "::group::smoke test on ${platform}"
@@ -212,10 +231,13 @@ jobs:
             # TIM's shipped tim.yaml requires TIM_ADMIN_TOKEN
             # (security.require_admin_token: true). Smoke test uses
             # a throwaway value; no privileged endpoint is exercised.
+            # The smoke.yaml override above disables the FN1 client-
+            # auth gate so startup doesn't refuse.
             tim_cid="$(docker run -d --platform "${platform}" \
                        -e TIM_DATABASE_URL="postgres://tim:smoke@${pg_ip}:5432/tim" \
                        -e TIM_ADMIN_TOKEN=smoke-only-not-a-real-secret \
                        -v "${key_dir}:/opt/tim/keys:ro" \
+                       -v "${smoke_yaml}:/app/tim.yaml:ro" \
                        -p 18085:8085 "${IMAGE}")"
 
             ok=0
@@ -243,6 +265,7 @@ jobs:
           done
 
           rm -rf "${key_dir}"
+          rm -f "${smoke_yaml}"
 
       # Create the GitHub Release entry for this tag if one doesn't
       # already exist. Body = the matching CHANGELOG.md section
