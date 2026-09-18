@@ -7,97 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.4.1-alpha] - 2026-09-18
 
-- **Docker runtime image switched to distroless** (h2ck.me v1
-  NEXT-TASKS T-12 / BREAK-TESTS-GAP-CLOSURE-v1 G1). The runtime
-  stage is now `gcr.io/distroless/cc-debian12:nonroot` instead of
-  `debian:13.6-slim`. Trivy `--severity HIGH,CRITICAL` count drops
-  from **65** (3 CRITICAL + 62 HIGH) on the old image to **0** on
-  the new one. Image size shrinks from 119 MB to 32 MB. No shell,
-  no package manager, no `curl`, no `useradd`. Ships as
-  `USER nonroot:nonroot` (UID 65532). Dropped `tini`: TIM is a
-  single-process axum server, no children to reap; K8s or
-  `docker run --init` cover PID-1 signal forwarding if needed.
+Eight PRs (#28–#32, #52–#54) rolled into a coordinated release
+closing the remaining h2ck.me v1 NEXT-TASKS backlog: T-4, T-7, T-8,
+T-12, T-13, T-15, T-18, T-19. Every open finding from the h2ck.me v1
+audit is now landed.
 
-### Security
+No breaking wire-behaviour changes. The only operator-visible shift
+is the container runtime — see "Upgrading from 0.4.0-alpha" below.
 
-- **Slow-body Slowloris probe (T-15).** Verified that
-  `tower_http::timeout::TimeoutLayer` bounds body-read too, not just
-  handler execution: a request that trickles bytes past
-  `server.request_timeout_seconds` is aborted at the configured
-  deadline. Not vulnerable, but pinned by a regression test at
-  `tests/security_slow_body_timeout.rs` — 8s trickle against a 2s
-  timeout completes in ~2s. (h2ck.me v1 NEXT-TASKS T-15 /
-  BREAK-TESTS-SUMMARY-v1 §Universal residuals #5)
-- **Admin-surface audit (T-19).** Enumerated every route in
-  `src/router/mod.rs::build_router` and confirmed no accidental public
-  exposure: every mutating endpoint runs behind `AdminAuth`, every
-  session-scoped read behind `SessionAuth`, the seven public-by-design
-  endpoints are all protocol-required (health probes, JWKS, OAuth
-  flow endpoints, RFC 7662 discovery). Regression pin:
-  `tests/security_admin_surface_audit.rs` — 5 cases pinning the
-  admin / bearer / session / cookie gates AND that documented-public
-  routes do NOT 401 (mirror invariant). Book updated: `Endpoint auth
-  invariants` section in `book/src/security-hardening.md`. Explicit
-  verdict: TIM does NOT adopt a Ruuter-style `/_/*` env-gated admin
-  surface — the current gating is comprehensive and adding `/_/*`
-  would offer attackers a distinct env-shape to probe without
-  security benefit. (h2ck.me v1 NEXT-TASKS T-19)
+### Upgrading from 0.4.0-alpha
+
+**Container runtime switched to distroless** (T-12 / G1). If your
+deployment pulls `docker.io/turnerrainer/tim:0.4.1-alpha` (or
+`ghcr.io/...`) unchanged, no action needed — the smaller, zero-CVE
+image runs as `nonroot:nonroot` (UID 65532) and starts on the same
+port with the same env vars.
+
+If your deployment customises the container in any of these ways,
+adjust before upgrading:
+
+- **Custom `Dockerfile FROM tim:0.4.0-alpha`** — the base is now
+  `gcr.io/distroless/cc-debian12:nonroot`. No shell, no `apt`, no
+  `curl`. Move any `RUN` steps into an earlier builder stage.
+- **Custom HEALTHCHECK invoking `curl`** — swap to
+  `["CMD", "/app/tim", "healthcheck"]`. The `tim healthcheck`
+  subcommand probes `/health` via reqwest and exits 0/1; no shell
+  needed.
+- **`docker exec <container> sh`** — no shell exists. Use
+  `kubectl debug --image=busybox` on K8s, or attach a debug
+  sidecar in compose.
+- **Bind-mounted paths under `/opt/tim/keys`** — the container user
+  is UID 65532 (was 1000). Ensure the file mode allows reads by
+  that UID.
+- **`tini` as PID 1** — removed. TIM is a single-process axum server;
+  child-reaping is a no-op. K8s or `docker run --init` cover PID-1
+  signal forwarding externally if needed.
+
+**No schema migration required.**
 
 ### Added
 
-- **`tim healthcheck` subcommand.** Probes `/health` via `reqwest`
-  and exits 0 on 200 / 1 otherwise. Wired as the docker-compose
-  `HEALTHCHECK` on the distroless image (which has no `curl` / shell
-  for `CMD-SHELL`). `--url` overrides the default
-  `http://127.0.0.1:<server.port>/health`; `--timeout-seconds`
-  bounds the probe (default 5s). (h2ck.me v1 NEXT-TASKS T-12)
-
-- `jwt.previous_key` config block — signing-key rotation with a grace
-  period during which JWKS emits both keys and `/introspect` accepts
-  tokens signed by either. Retirement instant is explicit
-  (`retires_at`, RFC 3339); after retirement the previous key is
-  dropped from JWKS and refused on verification. Boot + `tim doctor`
-  emit WARN when the retirement cliff is within
+- **`jwt.previous_key` config block** (T-7 / F-PR-3) — signing-key
+  rotation with a grace period. JWKS emits both keys and
+  `/introspect` accepts tokens signed by either while
+  `retires_at > now`; after `retires_at` the previous key is dropped
+  from JWKS and refused on verification. Boot + `tim doctor` emit
+  WARN when the retirement cliff is within
   `jwt.rotation_warn_days` days (default 7). See
-  `book/src/security-hardening.md` §Key rotation. (h2ck.me v1
-  NEXT-TASKS T-7 / BREAK-TESTS-OWASP-PROBES-v1 F-PR-3)
+  `book/src/security-hardening.md` §Grace-period rotation.
+- **`tim healthcheck` subcommand** (T-12) — probes `/health` via
+  `reqwest` and exits 0 on 200 / 1 otherwise. Wired as the
+  docker-compose HEALTHCHECK on the distroless image (which has no
+  `curl` / shell for `CMD-SHELL`). `--url` overrides the default
+  `http://127.0.0.1:<server.port>/health`; `--timeout-seconds`
+  bounds the probe (default 5s).
+
+### Changed
+
+- **Docker runtime image switched to distroless** (T-12 / G1). Was
+  `debian:13.6-slim`; now `gcr.io/distroless/cc-debian12:nonroot`.
+  Trivy `--severity HIGH,CRITICAL` count drops from **65** (3
+  CRITICAL + 62 HIGH) to **0**. Image size shrinks from 119 MB to
+  32 MB. No shell, no package manager, no `curl`, no `useradd`. See
+  "Upgrading from 0.4.0-alpha" above.
+- `.cargo/audit.toml` (T-13) — reviewed `RUSTSEC-2023-0071` (rsa
+  Marvin timing) rationale. Confirmed session-at-rest encryption
+  uses ChaCha20-Poly1305 (not RSA), no `RsaPrivateKey::decrypt`
+  call path exists. Next review 2027-03-18.
 
 ### Fixed
 
-- **JWKS thundering herd (concurrency mini-audit R-3).**
+- **JWKS thundering herd** (T-4 / concurrency mini-audit R-3).
   `src/oauth2/jwks.rs` replaces the `get()` + `insert()` cache-miss
   path with Moka's `try_get_with`, coalescing N concurrent misses on
   the same `jwks_uri` into a single upstream fetch. Regression pin:
   `oauth2::jwks::tests::concurrent_misses_coalesce_to_single_upstream_fetch`
-  — 100 concurrent misses → 1 upstream hit. (h2ck.me v1 NEXT-TASKS
-  T-4)
-- **Attacker-controlled fields clipped in error responses (AP-6).**
-  Provider IDs, OIDC callback `error` + `error_description`, id_token
-  parse errors, JWK decode errors, and `?jwt=` echoes are all clipped
-  to 256 characters via `error::clip_untrusted`. Bounds response
-  payload from a malformed input and caps downstream log-echo blast
-  radius. Regression pin: `tests/security_error_echo_clipped.rs`.
-  (h2ck.me v1 NEXT-TASKS T-18 / BREAK-TESTS-OWASP-PROBES-v1 AP-6)
-
-### Changed
-
-- `.cargo/audit.toml` — reviewed `RUSTSEC-2023-0071` (rsa Marvin
-  timing) rationale. Confirmed TIM's session-at-rest encryption uses
-  ChaCha20-Poly1305 (not RSA), no `RsaPrivateKey::decrypt` call path
-  exists. Extended review date to 2027-03-18. (h2ck.me v1 NEXT-TASKS
-  T-13)
+  — 100 concurrent misses → 1 upstream hit.
+- **Attacker-controlled fields clipped in error responses** (T-18 /
+  AP-6). Provider IDs, OIDC callback `error` +
+  `error_description`, id_token parse errors, JWK decode errors,
+  and `?jwt=` echoes are all clipped to 256 characters via
+  `error::clip_untrusted`. Bounds response payload from a malformed
+  input and caps downstream log-echo blast radius. Regression pin:
+  `tests/security_error_echo_clipped.rs`.
 
 ### Security
 
-- **JWT algorithm-confusion regression pins (G4).** New test file
-  `security_jwt_alg_confusion_v1` proves TIM refuses `alg=none` with a
-  valid kid, HS256-signed-with-public-key, and every symmetric
-  algorithm + `none` forging the signer's kid. All must resolve to
-  `{"active": false}` — pins TIM's positive control against a future
-  regression that swaps in a permissive `Validation`. (h2ck.me v1
-  NEXT-TASKS T-8)
+- **JWT algorithm-confusion regression pins** (T-8 / G4).
+  `tests/security_jwt_alg_confusion_v1.rs` proves TIM refuses
+  `alg=none` with a valid kid, HS256-signed-with-public-key, and
+  every symmetric algorithm + `none` forging the signer's kid — all
+  resolve to `{"active": false}`. Pins the positive control against
+  a future regression that swaps in a permissive `Validation`.
+- **Slow-body Slowloris probe** (T-15). Verified that
+  `tower_http::timeout::TimeoutLayer` bounds body-read too, not
+  just handler execution: a request that trickles bytes past
+  `server.request_timeout_seconds` is aborted at the configured
+  deadline. Not vulnerable, but pinned by
+  `tests/security_slow_body_timeout.rs` — 8s trickle against a 2s
+  timeout completes in ~2s.
+- **Admin-surface audit** (T-19). Enumerated every route in
+  `src/router/mod.rs::build_router`; confirmed no accidental public
+  exposure — every mutating endpoint runs behind `AdminAuth`, every
+  session-scoped read behind `SessionAuth`, the eight
+  public-by-design endpoints are all protocol-required (health
+  probes, JWKS, OAuth flow endpoints, RFC 7662 discovery).
+  Regression pin: `tests/security_admin_surface_audit.rs` — 5 cases
+  covering admin/bearer/session/cookie 401s AND that
+  documented-public routes do NOT 401. Book updated with the full
+  inventory (§Endpoint auth invariants). Explicit verdict: TIM does
+  NOT adopt a Ruuter-style `/_/*` env-gated admin surface — the
+  current gating is comprehensive and adding `/_/*` would offer
+  attackers a distinct env-shape to probe without security benefit.
 
 ## [0.4.0-alpha] - 2026-09-12
 
