@@ -211,13 +211,21 @@ There is no runtime rotation endpoint. This is deliberate — see the
 
 The shipped Dockerfile + docker-compose.yml enforce:
 
-- Non-root user (`useradd -m -u 1000 tim`).
+- **Distroless runtime** (`gcr.io/distroless/cc-debian12:nonroot`)
+  — no shell, no package manager, no `curl` / `wget`, no useradd.
+  Trivy `--severity HIGH,CRITICAL` baseline: 0. (Old
+  `debian:13.6-slim` runtime: 3 CRITICAL + 62 HIGH.)
+- Runs as `USER nonroot:nonroot` (UID 65532) — no root at any point.
 - Read-only root filesystem (`read_only: true`), tmpfs for `/tmp`.
 - All Linux capabilities dropped (`cap_drop: [ALL]`).
 - `no-new-privileges` set.
 - Resource limits (CPU / memory) applied.
-- Tini as init to reap zombies.
-- Healthcheck on `/health` every 30 s.
+- Healthcheck via `tim healthcheck` (probes `/health` via reqwest;
+  no shell needed) every 30 s.
+
+**No tini.** TIM is a single-process axum server — the child-reaping
+role tini plays for multi-process containers is a no-op here. K8s or
+`docker run --init` cover PID-1 signal forwarding if needed.
 
 If you build your own image, keep these guarantees. If you run TIM
 outside Docker (systemd, Nomad), replicate the equivalent primitives.

@@ -41,6 +41,18 @@ enum Command {
         #[arg(long)]
         strict: bool,
     },
+    /// Probe the /health endpoint and exit 0 on 200, 1 otherwise.
+    /// Wired as the container HEALTHCHECK on distroless images which
+    /// have no `curl` / `wget` / shell available to Docker.
+    Healthcheck {
+        /// URL to probe. Defaults to http://127.0.0.1:<port> where
+        /// <port> is read from tim.yaml (server.port).
+        #[arg(long)]
+        url: Option<String>,
+        /// Overall timeout in seconds. Default 5.
+        #[arg(long, default_value = "5")]
+        timeout_seconds: u64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -71,6 +83,45 @@ fn run() -> Result<ExitCode> {
             runtime.block_on(serve(cli.config))?;
             Ok(ExitCode::SUCCESS)
         }
+        Command::Healthcheck {
+            url,
+            timeout_seconds,
+        } => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let code = runtime.block_on(healthcheck(cli.config, url, timeout_seconds));
+            Ok(ExitCode::from(code as u8))
+        }
+    }
+}
+
+/// Docker HEALTHCHECK entry point for the distroless image (which has
+/// no `curl` / shell). Reads `server.port` from tim.yaml if `--url` is
+/// omitted; probes `<url>/health` with a short timeout; exits 0 on
+/// HTTP 200, 1 on anything else.
+async fn healthcheck(
+    config_path: Option<PathBuf>,
+    url_override: Option<String>,
+    timeout_seconds: u64,
+) -> i32 {
+    let url = match url_override {
+        Some(u) => u,
+        None => match AppConfig::load(config_path.as_deref()) {
+            Ok(c) => format!("http://127.0.0.1:{}/health", c.server.port),
+            Err(_) => "http://127.0.0.1:8085/health".into(),
+        },
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_seconds))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return 1,
+    };
+    match client.get(&url).send().await {
+        Ok(r) if r.status().is_success() => 0,
+        _ => 1,
     }
 }
 
