@@ -47,6 +47,48 @@ var is unset or empty.
 Startup logs a WARN. Never deploy this way to a network reachable by
 untrusted callers.
 
+## Endpoint auth invariants
+
+Full audit performed 2026-09-18 (h2ck.me v1 NEXT-TASKS T-19). Every
+route in `src/router/mod.rs::build_router` was classified. Regression
+pin: `tests/security_admin_surface_audit.rs`.
+
+**Public-by-design** (no credentials, cannot be gated without breaking
+the protocol or the operator's health-check story):
+
+| Route | Why public |
+|---|---|
+| `GET /health`, `GET /healthz` | LB / K8s liveness probe. |
+| `GET /auth/health` | OAuth registry status probe. |
+| `GET /jwt/keys/public` | RFC 7517 JWKS — verifiers pull unauth. |
+| `GET /jwt/verification-key` | Legacy JVM 1.x PEM mirror of JWKS. |
+| `GET /introspect/types` | RFC 7662-shaped discovery of supported token types. |
+| `GET /auth/providers`, `GET /auth/providers/:id` | Public provider catalogue (client picks a provider before it has a session). |
+| `GET /auth/login/:id` | Starts OAuth flow — must be reachable pre-session. |
+| `GET /auth/callback/:id` | Called by the IdP after user consent — must be reachable pre-session. |
+
+**Optionally gated** (config flag decides): `POST /introspect` +
+`/jwt/custom/validate*` + the three JVM cookie validation compat
+endpoints — see [Validation-endpoint DoS gate](#validation-endpoint-dos-gate-audit-f-tim-2-f-tim-6)
+below.
+
+**Always gated** (`admin`, `bearer`, `session`, or `cookie` extractor):
+every write path (`generate`, `revoke*`, `extend*`, `blacklist*`) and
+every session-scoped read (`/auth/session/validate`, `/auth/profile`,
+`/auth/logout`, `/jwt/custom/list/me`, all JVM cookie compat handlers).
+
+The full auth matrix lives in [API reference →
+Auth legend](./reference/api.md#auth-legend); this section only
+summarises the security invariant.
+
+**Verdict on Ruuter-style `/_/*` admin surface:** not adopted. Ruuter's
+`/_/*` env-gated prefix solves a different problem (per-environment
+feature-flag surfaces for its runtime config UI). TIM's admin surface
+is already comprehensive: every mutating endpoint runs behind
+`AdminAuth`, every session read behind `SessionAuth`, no admin-shaped
+functionality lives on a public route. Adding `/_/*` would give
+attackers a distinct env-shape to probe without security benefit.
+
 ## HTTP response headers
 
 **Config:** `security.content_security_policy`,
