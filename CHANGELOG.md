@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **JWKS thundering herd (concurrency mini-audit R-3).**
+  `src/oauth2/jwks.rs` replaces the `get()` + `insert()` cache-miss
+  path with Moka's `try_get_with`, coalescing N concurrent misses on
+  the same `jwks_uri` into a single upstream fetch. Regression pin:
+  `oauth2::jwks::tests::concurrent_misses_coalesce_to_single_upstream_fetch`
+  — 100 concurrent misses → 1 upstream hit. (h2ck.me v1 NEXT-TASKS
+  T-4)
+
 ### Changed
 
 - `.cargo/audit.toml` — reviewed `RUSTSEC-2023-0071` (rsa Marvin
