@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **JWT algorithm-confusion regression pins (G4).** New test file
+  `security_jwt_alg_confusion_v1` proves TIM refuses `alg=none` with a
+  valid kid, HS256-signed-with-public-key, and every symmetric
+  algorithm + `none` forging the signer's kid. All must resolve to
+  `{"active": false}` — pins TIM's positive control against a future
+  regression that swaps in a permissive `Validation`. (h2ck.me v1
+  NEXT-TASKS T-8)
+
 ## [0.4.0-alpha] - 2026-09-12
 
 Twelve PRs landed on `dev` between 2026-09-11 and 2026-09-12 as
