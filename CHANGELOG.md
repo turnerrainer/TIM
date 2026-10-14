@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macro expansion, not TIM source. Unblocks the `tests` CI
   workflow.
 
+### Security
+
+- Suppress `RUSTSEC-2024-0449` (unmaintained `unsafe-libyaml`) in
+  `.cargo/audit.toml` and `deny.toml` with rationale + review date.
+  Pulled in only as a transitive dep of `serde_yaml_ng`, which parses
+  the operator-supplied YAML config file at startup — not reachable
+  from the network. Unblocks the scheduled `security` CI workflow.
+  Migration away from `serde_yaml_ng` is tracked as a follow-up.
+
 ## [0.4.1-alpha] - 2026-09-18
 
 Eight PRs (#28–#32, #52–#54) rolled into a coordinated release

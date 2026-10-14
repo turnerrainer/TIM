@@ -22,4 +22,18 @@ ignore = [
     # (`src/oauth2/session/crypto.rs`), not RSA.
     # Reviewed: 2026-09-18. Next review: 2027-03-18.
     "RUSTSEC-2023-0071",
+
+    # `unsafe-libyaml` — upstream repository archived 2024-03-25.
+    # Unmaintained, not a vulnerability — no known exploitable CVE.
+    # Pulled in only as a transitive dep of `serde_yaml_ng` (the
+    # single consumer), used by `src/config/mod.rs` to parse the
+    # operator-supplied YAML config file at startup. Input is a
+    # local file controlled by the operator, not reachable from
+    # the network, so the attack surface for a YAML parser bug is
+    # effectively nil in TIM's threat model. Migration away from
+    # serde_yaml_ng (candidates: serde-saphyr, noyalib) is tracked
+    # as a follow-up; it's a non-trivial API swap not worth
+    # blocking CI on while there's no concrete vuln.
+    # Reviewed: 2026-10-14. Next review: 2027-04-14.
+    "RUSTSEC-2024-0449",
 ]
