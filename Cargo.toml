@@ -78,6 +78,16 @@ path = "src/main.rs"
 # Clippy posture — matches Ruuter-on-Rust + XTR + DEV-REQUIREMENTS §2.
 # `cargo clippy --all-targets -- -D warnings` is the CI gate.
 [lints.clippy]
+# `#[async_trait]` expands to a boxed-future return type that is
+# already `#[must_use]`, then layers its own `#[must_use]` attribute
+# on top. Rust 1.99.0's `clippy::double_must_use` lint flags each
+# `async fn` inside an `#[async_trait]`-decorated trait as an error
+# under `-D warnings`. The offending `#[must_use]` lives inside the
+# macro expansion of a third-party crate (`async-trait`), not our
+# source. Allowing the lint is the only fix that doesn't require
+# forking `async-trait`. Revisit if TIM migrates to native
+# async-fn-in-traits.
+double_must_use = "allow"
 
 [profile.release]
 lto = "thin"
