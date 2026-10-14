@@ -20,6 +20,7 @@ yanked = "deny"
 # review date live there.
 ignore = [
     "RUSTSEC-2023-0071",
+    "RUSTSEC-2024-0449",
 ]
 
 [licenses]

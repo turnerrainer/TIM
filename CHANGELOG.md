@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow `clippy::double_must_use` in `Cargo.toml [lints.clippy]`.
+  Rust 1.99.0's new lint flags `async fn` inside `#[async_trait]`
+  blocks (the macro layers its own `#[must_use]` on top of an
+  already-`#[must_use]` boxed future), breaking
+  `cargo clippy --all-targets -- -D warnings` on every PR against
+  `dev`. The offending attribute is in the `async-trait` crate's
+  macro expansion, not TIM source. Unblocks the `tests` CI
+  workflow.
+
+### Security
+
+- Suppress `RUSTSEC-2024-0449` (unmaintained `unsafe-libyaml`) in
+  `.cargo/audit.toml` and `deny.toml` with rationale + review date.
+  Pulled in only as a transitive dep of `serde_yaml_ng`, which parses
+  the operator-supplied YAML config file at startup — not reachable
+  from the network. Unblocks the scheduled `security` CI workflow.
+  Migration away from `serde_yaml_ng` is tracked as a follow-up.
+
 ## [0.4.1-alpha] - 2026-09-18
 
 Eight PRs (#28–#32, #52–#54) rolled into a coordinated release
