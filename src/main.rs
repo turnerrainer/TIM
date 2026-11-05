@@ -132,12 +132,20 @@ async fn serve(config_path: Option<PathBuf>) -> Result<()> {
     // stream SIEM-friendly and prevent attacker-injected ESC bytes
     // from blending with server-emitted noise.
     use std::io::IsTerminal;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    // Optional OTLP trace export (`OTEL_EXPORTER_OTLP_ENDPOINT`, see
+    // `tim::observability`). `None` when off; an absent layer leaves the
+    // log output exactly as with the plain `fmt()` subscriber.
+    let tracer_provider = tim::observability::init_provider_from_env();
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(true)
+                .with_ansi(std::io::stderr().is_terminal()),
         )
-        .with_target(true)
-        .with_ansi(std::io::stderr().is_terminal())
+        .with(tracer_provider.as_ref().map(tim::observability::layer))
         .init();
 
     let config = AppConfig::load(config_path.as_deref()).context("failed to load config")?;
@@ -235,6 +243,39 @@ async fn serve(config_path: Option<PathBuf>) -> Result<()> {
     info!(%addr, "TIM listening");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+    if tracer_provider.is_some() {
+        // Export on: stop on SIGTERM / Ctrl-C after in-flight requests
+        // finish, then flush queued spans. Export off keeps the previous
+        // behaviour (no signal handler).
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+        info!("shutdown signal received; flushing spans");
+        tim::observability::shutdown(tracer_provider);
+    } else {
+        axum::serve(listener, router).await?;
+    }
     Ok(())
+}
+
+/// Resolves on SIGTERM (container stop) or Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

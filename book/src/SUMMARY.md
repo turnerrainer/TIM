@@ -6,6 +6,7 @@
 - [Configuration](./configuration.md)
 - [OAuth2 / OIDC](./oauth2.md)
 - [Security hardening](./security-hardening.md)
+- [Observability: trace export](./observability.md)
 - [Legacy compatibility](./legacy-compat.md)
 - [Migrating from JVM TIM](./migration-from-jvm.md)
 - [Failure modes](./failure-modes.md)

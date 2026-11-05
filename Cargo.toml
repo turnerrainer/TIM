@@ -55,6 +55,13 @@ async-trait = "0.1"
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Optional OTLP trace export, enabled at runtime by OTEL_EXPORTER_OTLP_ENDPOINT.
+# tonic is built without TLS (keeps rustls-pemfile out of the tree); TLS
+# endpoints use OTLP/HTTP through the reqwest client above.
+opentelemetry = { version = "0.27", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.27", default-features = false, features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["trace", "grpc-tonic", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = { version = "0.28", default-features = false }
 
 # Errors
 thiserror = "2"

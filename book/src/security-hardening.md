@@ -365,6 +365,11 @@ INFO http_request_completed method=POST route=/introspect
      status=200 duration_us=1234 trace_id=<same 32-hex value>
 ```
 
+With OTLP trace export enabled, the response `traceparent` names TIM's
+exported request span instead of a random span id. Export never records
+headers, bodies, query strings, tokens or personal data; see
+[Observability](./observability.md#never-exported).
+
 ## Strict request schemas — `#[serde(deny_unknown_fields)]`
 
 Every modern JSON body / form / query DTO carries
