@@ -95,9 +95,7 @@ async fn load(
     if let Some(TimError::UpstreamTimeout(msg)) = crate::http::block_if_offline(jwks_uri) {
         return Err(LoaderErr::Offline(msg));
     }
-    let resp = http
-        .get(jwks_uri)
-        .send()
+    let resp = crate::observability::send(http.get(jwks_uri), "oidc.jwks")
         .await
         .map_err(|e| LoaderErr::BadGateway(format!("JWKS fetch: {e}")))?;
     if !resp.status().is_success() {

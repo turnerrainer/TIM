@@ -272,6 +272,9 @@ Every value TIM reads at runtime is one of:
   (`info`, `debug`, `tim=debug,sqlx=warn`).
 - `TIM_CONFIG` — path to the config file (alternative to `--config`).
 - `TIM_OFFLINE` — see below.
+- `OTEL_EXPORTER_OTLP_*`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`
+  — optional trace export, off by default. See
+  [Observability](./observability.md).
 
 There are no undocumented env vars.
 

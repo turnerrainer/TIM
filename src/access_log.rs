@@ -40,6 +40,7 @@ use axum::http::HeaderValue;
 use axum::middleware::Next;
 use axum::response::Response;
 use std::time::Instant;
+use tracing::Instrument;
 
 /// Header name for the compact trace-id echo — useful for clients
 /// that don't parse the full W3C `traceparent`.
@@ -54,13 +55,33 @@ pub async fn access_log_middleware(req: Request, next: Next) -> Response {
         .get::<MatchedPath>()
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| "<unmatched>".to_string());
-    let (trace_id, flags) = parse_or_generate_trace_id(&req);
-    let span_id = fresh_span_id();
+    // OTLP export on: one SERVER span per request (health probes excluded),
+    // parented on the inbound `traceparent`. The trace id, span id and
+    // flags then come from that span, so logs, response headers and
+    // exported spans agree. Export off: no span, ids as before.
+    let request_span = if crate::observability::otel_active() && !is_probe(&route) {
+        server_span(&req, method.as_str(), &route)
+    } else {
+        tracing::Span::none()
+    };
+    let (trace_id, span_id, flags) = match crate::observability::span_ids(&request_span) {
+        Some(ids) => ids,
+        None => {
+            let (trace_id, flags) = parse_or_generate_trace_id(&req);
+            (trace_id, fresh_span_id(), flags)
+        }
+    };
 
-    let mut response = next.run(req).await;
+    let mut response = next.run(req).instrument(request_span.clone()).await;
 
     let status = response.status().as_u16();
     let duration_us = start.elapsed().as_micros();
+    request_span.record("http.response.status_code", status);
+    // Server spans: only 5xx is an error (4xx is the caller's fault).
+    if status >= 500 {
+        request_span.record("otel.status_code", "ERROR");
+        request_span.record("error.type", status.to_string());
+    }
 
     tracing::info!(
         method = %method,
@@ -97,6 +118,37 @@ pub async fn access_log_middleware(req: Request, next: Next) -> Response {
     }
 
     response
+}
+
+/// Health / readiness routes: no span, they would dominate exported data.
+fn is_probe(route: &str) -> bool {
+    matches!(route, "/health" | "/healthz" | "/auth/health")
+}
+
+/// SERVER span for one request. Fields: matched route pattern (never the
+/// raw URI, so no path parameters or query string), method, status. No
+/// header, body or client address.
+fn server_span(req: &Request, method: &str, route: &str) -> tracing::Span {
+    let span = tracing::info_span!(
+        "http_request",
+        otel.name = %format!("{method} {route}"),
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        http.request.method = %method,
+        http.route = %route,
+        http.response.status_code = tracing::field::Empty,
+        "error.type" = tracing::field::Empty,
+    );
+    if let Some(tp) = req
+        .headers()
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+    {
+        // TIM accepts upper-case hex (see `parse_or_generate_trace_id`); the
+        // OTel propagator only lower-case.
+        crate::observability::set_parent_from_traceparent(&span, &tp.to_ascii_lowercase());
+    }
+    span
 }
 
 /// W3C traceparent header format: `<version>-<32-char-trace-id>-<16-char-span-id>-<flags>`.

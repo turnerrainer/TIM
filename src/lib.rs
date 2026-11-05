@@ -13,6 +13,7 @@ pub mod http;
 pub mod introspect;
 pub mod jwt;
 pub mod oauth2;
+pub mod observability;
 pub mod router;
 pub mod security;
 

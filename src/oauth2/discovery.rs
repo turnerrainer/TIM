@@ -164,10 +164,7 @@ impl DiscoveryCache {
         if let Some(e) = crate::http::block_if_offline(url) {
             return Err(e);
         }
-        let resp = self
-            .http
-            .get(url)
-            .send()
+        let resp = crate::observability::send(self.http.get(url), "oidc.discovery")
             .await
             .map_err(|e| TimError::BadGateway(format!("discovery fetch: {e}")))?;
         let status = resp.status();

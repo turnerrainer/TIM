@@ -232,14 +232,14 @@ pub async fn complete_callback(
     if let Some(e) = crate::http::block_if_offline(&discovery.token_endpoint) {
         return Err(e);
     }
-    let resp = http
+    let token_request = http
         .post(&discovery.token_endpoint)
         // client_secret_basic, which OIDC Core makes the default when the client
         // registration does not say otherwise. Sending the pair as form fields
         // (client_secret_post) is what TARA rejects with 401 invalid_client.
         .basic_auth(&*provider.client_id, Some(&*provider.client_secret))
-        .form(&form)
-        .send()
+        .form(&form);
+    let resp = crate::observability::send(token_request, "oidc.token")
         .await
         .map_err(|e| {
             if e.is_timeout() {

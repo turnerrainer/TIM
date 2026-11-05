@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional OTLP trace export.** Off unless
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set; with it unset, behaviour,
+  outbound requests and log output are unchanged. Works with any
+  OpenTelemetry collector or OTLP-compatible backend.
+  - Transport: OTLP/gRPC (default, plaintext) or OTLP/HTTP protobuf
+    (`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, supports `https://`
+    through the existing HTTP client). `OTEL_EXPORTER_OTLP_HEADERS`,
+    `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_SERVICE_NAME` (default `tim`)
+    and `OTEL_RESOURCE_ATTRIBUTES` are honoured.
+  - Request span (kind `SERVER`) named after the matched route pattern,
+    parented on the inbound W3C `traceparent`. The response
+    `traceparent` names that span (same trace id and sampling flags).
+    5xx marks the span as an error; 4xx does not. `/health`, `/healthz`
+    and `/auth/health` produce no spans.
+  - Outbound OIDC calls (discovery, JWKS, token exchange) are `CLIENT`
+    spans and carry their `traceparent`; `url.full` has no query string.
+  - Never exported: bodies, form fields, query strings, header values,
+    tokens and claims, OAuth `code` / `state` / `nonce`, session ids and
+    log events. Dependency spans (e.g. `tower_http`) are not exported.
+  - With export on, SIGTERM / Ctrl-C stops TIM gracefully and flushes
+    queued spans. An unreachable collector does not affect requests.
+  - See `book/src/observability.md`.
+
 ### Fixed
 
 - Allow `clippy::double_must_use` in `Cargo.toml [lints.clippy]`.
