@@ -64,7 +64,9 @@ pub async fn access_log_middleware(req: Request, next: Next) -> Response {
     } else {
         tracing::Span::none()
     };
-    let (trace_id, span_id, flags) = match crate::observability::span_ids(&request_span) {
+    let exported_ids = crate::observability::span_ids(&request_span);
+    let exported = exported_ids.is_some();
+    let (trace_id, span_id, flags) = match exported_ids {
         Some(ids) => ids,
         None => {
             let (trace_id, flags) = parse_or_generate_trace_id(&req);
@@ -83,14 +85,28 @@ pub async fn access_log_middleware(req: Request, next: Next) -> Response {
         request_span.record("error.type", status.to_string());
     }
 
-    tracing::info!(
-        method = %method,
-        route = %route,
-        status,
-        duration_us,
-        trace_id = %trace_id,
-        "http_request_completed"
-    );
+    if exported {
+        // OTLP export on: also name the exported span, so the log line
+        // links to the exact span in the trace backend.
+        tracing::info!(
+            method = %method,
+            route = %route,
+            status,
+            duration_us,
+            trace_id = %trace_id,
+            span_id = %span_id,
+            "http_request_completed"
+        );
+    } else {
+        tracing::info!(
+            method = %method,
+            route = %route,
+            status,
+            duration_us,
+            trace_id = %trace_id,
+            "http_request_completed"
+        );
+    }
 
     // Attach W3C Trace Context on the response. `traceparent` is the
     // full spec form; `x-trace-id` is a convenience echo for tooling

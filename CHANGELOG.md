@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     parented on the inbound W3C `traceparent`. The response
     `traceparent` names that span (same trace id and sampling flags).
     5xx marks the span as an error; 4xx does not. `/health`, `/healthz`
-    and `/auth/health` produce no spans.
+    and `/auth/health` produce no spans. The access-log line also carries
+    the span's `span_id`.
   - Outbound OIDC calls (discovery, JWKS, token exchange) are `CLIENT`
     spans and carry their `traceparent`; `url.full` has no query string.
   - Never exported: bodies, form fields, query strings, header values,

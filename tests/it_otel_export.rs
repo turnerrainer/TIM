@@ -232,6 +232,64 @@ async fn request_span_continues_inbound_trace_with_route_pattern() {
     );
 }
 
+/// `MakeWriter` collecting fmt output for log assertions.
+#[derive(Clone, Default)]
+struct LogBuf(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogBuf {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(b);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuf {
+    type Writer = LogBuf;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+#[tokio::test]
+async fn access_log_line_names_the_exported_span() {
+    let Some(router) = setup(None).await else {
+        return;
+    };
+    observability::set_otel_active_for_tests(true);
+    let captured = Captured::default();
+    let provider = TracerProvider::builder()
+        .with_simple_exporter(captured.clone())
+        .build();
+    let logs = LogBuf::default();
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new("info"))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(logs.clone()),
+        )
+        .with(observability::layer(&provider));
+    let guard = tracing::subscriber::set_default(subscriber);
+    let _ = get(&router, "/auth/providers", &[("traceparent", INBOUND)]).await;
+    drop(guard);
+    let _ = provider.force_flush();
+
+    let span = &captured.named("GET /auth/providers")[0];
+    let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    let line = text
+        .lines()
+        .find(|l| l.contains("http_request_completed"))
+        .expect("access log line");
+    assert!(
+        line.contains(&format!("trace_id={}", span.span_context.trace_id()))
+            && line.contains(&format!("span_id={}", span.span_context.span_id())),
+        "{line}"
+    );
+}
+
 #[tokio::test]
 async fn request_without_or_with_bad_traceparent_is_a_root_matching_headers() {
     let Some(router) = setup(None).await else {

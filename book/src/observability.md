@@ -43,7 +43,8 @@ queue.
   `http.response.status_code`;
 - parented on the inbound `traceparent` when present. The response
   `traceparent` then names this span (same trace id, caller's sampling
-  flags), so the caller's trace and TIM's spans line up;
+  flags), so the caller's trace and TIM's spans line up. The access-log
+  line then also carries `span_id=<16 hex>` of that span;
 - status `ERROR` and `error.type` = status code for 5xx only.
 
 `/health`, `/healthz` and `/auth/health` produce no spans: probes would
