@@ -26,6 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the operator-supplied YAML config file at startup — not reachable
   from the network. Unblocks the scheduled `security` CI workflow.
   Migration away from `serde_yaml_ng` is tracked as a follow-up.
+- Update `tokio` 1.53.1 → 1.54.1 (`RUSTSEC-2026-0386`, `AsyncFd::new`
+  I/O-safety unsoundness) and the dev-only `rustix` 1.1.4 → 1.1.6
+  (`RUSTSEC-2026-0486`, xattr zero-length buffer unsoundness) via
+  `Cargo.lock`. Lockfile-only; no `Cargo.toml` change.
+- Suppress `RUSTSEC-2026-0459` (`libsqlite3-sys` bundled-SQLite
+  uninitialised-memory disclosure) in `.cargo/audit.toml` and
+  `deny.toml` with rationale + review date. The crate is present in
+  `Cargo.lock` only as an unresolved optional dependency of
+  `sqlx-macros-core`; TIM enables just the sqlx `postgres` driver, so
+  no SQLite code is compiled or linked. No sqlx release can pick up
+  the patched `libsqlite3-sys >= 0.39` (sqlx-sqlite 0.8.6 pins
+  `^0.30.1`, 0.9.0 caps `< 0.38`). Together with the two lockfile
+  bumps above, this turns the daily `security` workflow green again
+  (red since 2026-11-05).
 
 ## [0.4.1-alpha] - 2026-09-18
 

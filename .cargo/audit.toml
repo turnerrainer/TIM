@@ -36,4 +36,22 @@ ignore = [
     # blocking CI on while there's no concrete vuln.
     # Reviewed: 2026-10-14. Next review: 2027-04-14.
     "RUSTSEC-2024-0449",
+
+    # `libsqlite3-sys` 0.30.1 — bundled C SQLite uninitialised-memory
+    # disclosure (CVE-2026-119375, WAL, local attack vector).
+    # NOT compiled into TIM. The crate sits in Cargo.lock only because
+    # `sqlx-macros-core` declares `sqlx-sqlite` as an *optional*
+    # dependency and Cargo resolves optional deps into the lockfile
+    # even when the feature is off. TIM enables only sqlx's `postgres`
+    # driver (default-features = false), so
+    #   cargo tree -i libsqlite3-sys --target all --all-features -e all
+    # prints "nothing to print": no sqlite code is built or linked,
+    # and TIM never opens a SQLite database.
+    # Cannot be fixed by upgrading: the fix is libsqlite3-sys >=0.39.0
+    # but sqlx-sqlite 0.8.6 pins ^0.30.1 and sqlx-sqlite 0.9.0 caps
+    # <0.38, so no released sqlx can resolve a patched version.
+    # Re-check when a sqlx release allows libsqlite3-sys >=0.39, and
+    # immediately if TIM ever enables the sqlx `sqlite` feature.
+    # Reviewed: 2026-11-13. Next review: 2027-02-13.
+    "RUSTSEC-2026-0459",
 ]
