@@ -97,6 +97,7 @@ row.
 | `.claim_mappings` | map<string,string> | `{}` | `<canonical> → <IdP claim>`. |
 | `.token_validation.clock_skew_seconds` | u64 | `60` | Leeway for `exp`, `nbf`, `iat`. |
 | `.token_validation.cache_ttl_seconds` | u64 | `3600` | JWKS cache TTL. |
+| `.token_endpoint_auth_method` | string | `"client_secret_basic"` | How TIM authenticates to the token endpoint: `client_secret_basic` (HTTP Basic header) or `client_secret_post` (`client_id` / `client_secret` as form body fields). Must match the method the client is registered with at the provider. |
 | `.allowed_redirect_uris` | list<string> | `[]` | Allow-list of `redirect_uri` values. Empty = only the synthesised default. |
 
 ## `security`

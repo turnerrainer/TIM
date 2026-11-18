@@ -407,6 +407,7 @@ mod tests {
                 allowed_redirect_uris: vec![],
                 allow_http_discovery: false,
                 jwks_uri: None,
+                token_endpoint_auth_method: Default::default(),
             },
         };
         let claims = IdTokenClaims {

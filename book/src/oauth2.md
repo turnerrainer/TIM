@@ -138,6 +138,30 @@ Session-carrying endpoints accept three transports for the ID:
 
 See [Session storage](#session-storage) below.
 
+### Token endpoint client authentication
+
+TIM authenticates to the provider's token endpoint with HTTP Basic
+(`client_secret_basic`, the OIDC default; TARA requires it). Per RFC 6749 §2.3.1 the client ID and secret are
+form-urlencoded before being Basic-encoded. For a
+provider whose client is registered with `client_secret_post`, set it
+per provider:
+
+```yaml
+oauth2:
+  providers:
+    other:
+      # ...
+      token_endpoint_auth_method: "client_secret_post"
+```
+
+RFC 6749 §2.3.1 marks `client_secret_post` as NOT RECOMMENDED, so
+opt in only when the provider requires it. `client_id` and
+`client_secret` are then sent as form fields and no
+`Authorization` header is sent. The two methods are never combined
+(RFC 6749 §2.3: a client MUST NOT use more than one method per
+request). Other methods (e.g. `private_key_jwt`) are rejected when the
+config is loaded.
+
 ## ID token verification
 
 Every ID token returned by the token endpoint is validated per

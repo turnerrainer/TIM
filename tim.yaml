@@ -117,6 +117,9 @@ oauth2:
   #       first_name: "given_name"
   #       last_name: "family_name"
   #       email: "email"
+  #     # Token endpoint client auth: client_secret_basic (default)
+  #     # or client_secret_post.
+  #     token_endpoint_auth_method: "client_secret_basic"
   #     token_validation:
   #       clock_skew_seconds: 60
   #       cache_ttl_seconds: 3600

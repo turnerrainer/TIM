@@ -185,6 +185,26 @@ pub struct ProviderConfig {
     /// is trivial).
     #[serde(default)]
     pub jwks_uri: Option<String>,
+    /// How TIM authenticates to the provider's token endpoint
+    /// (OIDC Core §9 / RFC 6749 §2.3.1). Default `client_secret_basic`
+    /// (HTTP Basic), the default per OIDC Dynamic Client Registration §2
+    /// when the client registration is silent. Set `client_secret_post` for providers
+    /// registered with that method: `client_id` and `client_secret` are
+    /// then sent as form fields in the token request body instead.
+    #[serde(default)]
+    pub token_endpoint_auth_method: TokenEndpointAuthMethod,
+}
+
+/// Client authentication method for the OAuth2 token endpoint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenEndpointAuthMethod {
+    /// HTTP Basic `Authorization` header (RFC 6749 §2.3.1).
+    #[default]
+    ClientSecretBasic,
+    /// `client_id` + `client_secret` as `application/x-www-form-urlencoded`
+    /// body fields.
+    ClientSecretPost,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -670,6 +690,7 @@ impl AppConfig {
                 clock_skew_seconds = p.token_validation.clock_skew_seconds,
                 cache_ttl_seconds = p.token_validation.cache_ttl_seconds,
                 allowed_redirect_uris = ?p.allowed_redirect_uris,
+                token_endpoint_auth_method = ?p.token_endpoint_auth_method,
                 "provider");
             if p.allowed_redirect_uris.is_empty() && self.server.public_base_url.is_empty() {
                 warn!(target: "tim::config::diagnose",
@@ -914,6 +935,41 @@ oauth2:
         let mut c = AppConfig::default();
         c.introspection.required_client_auth = false;
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn token_endpoint_auth_method_defaults_to_basic_and_parses_post() {
+        let yaml = |extra: &str| {
+            format!(
+                r#"
+oauth2:
+  providers:
+    demo:
+      name: "demo"
+      discovery_url: "https://idp/.well-known/openid-configuration"
+      client_id_env: "X"
+      client_secret_env: "Y"
+{extra}"#
+            )
+        };
+        let c: AppConfig = serde_yaml_ng::from_str(&yaml("")).unwrap();
+        assert_eq!(
+            c.oauth2.providers["demo"].token_endpoint_auth_method,
+            TokenEndpointAuthMethod::ClientSecretBasic
+        );
+        let c: AppConfig = serde_yaml_ng::from_str(&yaml(
+            "      token_endpoint_auth_method: client_secret_post\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            c.oauth2.providers["demo"].token_endpoint_auth_method,
+            TokenEndpointAuthMethod::ClientSecretPost
+        );
+        // Unsupported methods (e.g. private_key_jwt) are refused at load, not ignored.
+        assert!(serde_yaml_ng::from_str::<AppConfig>(&yaml(
+            "      token_endpoint_auth_method: private_key_jwt\n"
+        ))
+        .is_err());
     }
 
     /// h2ck.me PR #10 review nit — an empty-string `jwks_uri` pin is

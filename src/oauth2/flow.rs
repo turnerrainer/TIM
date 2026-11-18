@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use url::Url;
 
+use crate::config::TokenEndpointAuthMethod;
 use crate::error::{Result, TimError};
 use crate::oauth2::discovery::Discovery;
 use crate::oauth2::idtoken;
@@ -232,22 +233,34 @@ pub async fn complete_callback(
     if let Some(e) = crate::http::block_if_offline(&discovery.token_endpoint) {
         return Err(e);
     }
-    let resp = http
-        .post(&discovery.token_endpoint)
-        // client_secret_basic, which OIDC Core makes the default when the client
-        // registration does not say otherwise. Sending the pair as form fields
-        // (client_secret_post) is what TARA rejects with 401 invalid_client.
-        .basic_auth(&*provider.client_id, Some(&*provider.client_secret))
-        .form(&form)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                TimError::UpstreamTimeout(format!("token endpoint: {e}"))
-            } else {
-                TimError::BadGateway(format!("token exchange: {e}"))
-            }
-        })?;
+    let mut req = http.post(&discovery.token_endpoint);
+    match provider.config.token_endpoint_auth_method {
+        // Default; OIDC Dynamic Client Registration §2 makes client_secret_basic the
+        // method when the client registration does not say otherwise. A provider registered for it rejects
+        // credentials in the body with 401 invalid_client (TARA does).
+        TokenEndpointAuthMethod::ClientSecretBasic => {
+            // RFC 6749 §2.3.1: id and secret are form-urlencoded *before* being
+            // used as the Basic username/password. reqwest's basic_auth does not
+            // do this, so a secret containing `:`, `%`, `+` or a space would be
+            // misparsed by the IdP.
+            req = req.basic_auth(
+                form_urlencode(&provider.client_id),
+                Some(form_urlencode(&provider.client_secret)),
+            );
+        }
+        // Opt-in per provider for IdPs registered with client_secret_post.
+        TokenEndpointAuthMethod::ClientSecretPost => {
+            form.push(("client_id", provider.client_id.to_string()));
+            form.push(("client_secret", provider.client_secret.to_string()));
+        }
+    }
+    let resp = req.form(&form).send().await.map_err(|e| {
+        if e.is_timeout() {
+            TimError::UpstreamTimeout(format!("token endpoint: {e}"))
+        } else {
+            TimError::BadGateway(format!("token exchange: {e}"))
+        }
+    })?;
     if !resp.status().is_success() {
         // Carry the provider's error body. OAuth2 error responses name the actual problem
         // (invalid_client, invalid_grant, ...); dropping it leaves a bare 401 that cannot
@@ -347,6 +360,11 @@ fn hex_encode(bytes: &[u8]) -> String {
     s
 }
 
+/// `application/x-www-form-urlencoded` encoding of a single value (RFC 6749 Appendix B).
+fn form_urlencode(v: &str) -> String {
+    url::form_urlencoded::byte_serialize(v.as_bytes()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +419,14 @@ mod tests {
     }
 
     #[test]
+    fn form_urlencode_leaves_plain_values_and_escapes_basic_auth_delimiters() {
+        // Plain id/secret (the common case) must be byte-for-byte unchanged.
+        assert_eq!(form_urlencode("tim-client_1.x*"), "tim-client_1.x*");
+        // `:` would split the Basic pair, `%`/`+`/space are urlencoding metacharacters.
+        assert_eq!(form_urlencode("a:b%c+d e"), "a%3Ab%25c%2Bd+e");
+    }
+
+    #[test]
     fn pkce_generates_unique_verifiers() {
         let (v1, _) = generate_pkce();
         let (v2, _) = generate_pkce();
@@ -424,6 +450,7 @@ mod tests {
                 allowed_redirect_uris: vec![],
                 allow_http_discovery: false,
                 jwks_uri: pin.map(str::to_string),
+                token_endpoint_auth_method: Default::default(),
             },
         }
     }

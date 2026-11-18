@@ -133,7 +133,8 @@ Beyond the `_env` fields in `tim.yaml`:
   (no `..Default::default()` for `ProviderConfig`, which doesn't
   derive `Default`). Recent additions to `ProviderConfig`:
   `allow_http_discovery: bool` (v0.3.0-alpha, PR #6) and
-  `jwks_uri: Option<String>` (v0.3.0-alpha, PR #10).
+  `jwks_uri: Option<String>` (v0.3.0-alpha, PR #10), and
+  `token_endpoint_auth_method: TokenEndpointAuthMethod` (Unreleased).
   Loopback check lives in the module-scope `bind_is_loopback`
   helper — used by BOTH `validate()` and `diagnose()`, do not
   duplicate the two-value string comparison locally.
