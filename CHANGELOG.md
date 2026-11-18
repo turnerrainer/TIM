@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Suppress `RUSTSEC-2026-0543` (unmaintained `chrono`) in
+  `.cargo/audit.toml` and `deny.toml` with rationale + review date.
+  Informational only, no patched release exists; chrono is also a hard
+  dependency of `sqlx`. Migration to `time` / `jiff` is a follow-up.
+  Unblocks `cargo audit --deny warnings` and `cargo deny check
+  advisories`.
 - Suppress `RUSTSEC-2024-0449` (unmaintained `unsafe-libyaml`) in
   `.cargo/audit.toml` and `deny.toml` with rationale + review date.
   Pulled in only as a transitive dep of `serde_yaml_ng`, which parses
