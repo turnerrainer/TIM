@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ID-token verification now refetches the provider JWKS when a token
+  carries a `kid` missing from the cached set (rate-limited to one
+  forced refetch per `jwks_uri` per 60 s). Previously a provider key
+  rotation (e.g. TARA/GovSSO) rejected every login until the
+  `cache_ttl_seconds` cache expired.
 - Allow `clippy::double_must_use` in `Cargo.toml [lints.clippy]`.
   Rust 1.99.0's new lint flags `async fn` inside `#[async_trait]`
   blocks (the macro layers its own `#[must_use]` on top of an

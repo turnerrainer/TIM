@@ -104,7 +104,21 @@ pub async fn verify(
         ));
     }
 
-    let set = jwks.fetch(&discovery.jwks_uri).await?;
+    let mut set = jwks.fetch(&discovery.jwks_uri).await?;
+    if let Some(kid) = header.kid.as_deref() {
+        let known = |s: &jsonwebtoken::jwk::JwkSet| {
+            s.keys
+                .iter()
+                .any(|k| k.common.key_id.as_deref() == Some(kid))
+        };
+        // Unknown kid: the IdP probably rotated its signing key. Refetch
+        // the JWKS (rate-limited) instead of waiting for the cache TTL.
+        if !known(&set) {
+            if let Some(fresh) = jwks.refresh(&discovery.jwks_uri).await? {
+                set = fresh;
+            }
+        }
+    }
     let key: &Jwk = match header.kid.as_deref() {
         Some(kid) => set
             .keys

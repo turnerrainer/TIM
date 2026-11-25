@@ -4,8 +4,9 @@
 //! TTL comes from the per-provider `token_validation.cache_ttl_seconds`
 //! (defaulted to 3600 s in `config::TokenValidationConfig`).
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use jsonwebtoken::jwk::JwkSet;
 use moka::future::Cache;
@@ -18,10 +19,18 @@ use crate::error::{Result, TimError};
 /// cheaply.
 type SharedJwks = Arc<JwkSet>;
 
+/// Minimum gap between forced (cache-bypassing) refetches of one
+/// `jwks_uri`. Bounds the load an attacker can put on the IdP's JWKS
+/// endpoint by sending tokens with random `kid` values.
+const MIN_FORCED_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 pub struct JwksCache {
     cache: Arc<Cache<String, SharedJwks>>,
     http: reqwest::Client,
+    /// Last forced refresh attempt per `jwks_uri`.
+    last_forced: Arc<Mutex<HashMap<String, Instant>>>,
+    min_forced_interval: Duration,
 }
 
 impl JwksCache {
@@ -41,7 +50,38 @@ impl JwksCache {
         Self {
             cache: Arc::new(cache),
             http,
+            last_forced: Arc::new(Mutex::new(HashMap::new())),
+            min_forced_interval: MIN_FORCED_REFRESH_INTERVAL,
         }
+    }
+
+    /// Bypass the cache and refetch the JWKS, replacing the cached
+    /// entry. Used when a token carries a `kid` the cached set does
+    /// not know: the IdP has most likely rotated its signing key and
+    /// waiting out the TTL would reject every login in the meantime.
+    ///
+    /// Rate-limited per `jwks_uri`: returns `Ok(None)` when a forced
+    /// refresh was already attempted within the minimum interval (the
+    /// attempt is recorded even if it failed).
+    pub async fn refresh(&self, jwks_uri: &str) -> Result<Option<SharedJwks>> {
+        {
+            let mut last = self
+                .last_forced
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let now = Instant::now();
+            if let Some(prev) = last.get(jwks_uri) {
+                if now.duration_since(*prev) < self.min_forced_interval {
+                    return Ok(None);
+                }
+            }
+            last.insert(jwks_uri.to_string(), now);
+        }
+        let fresh = load(&self.http, jwks_uri)
+            .await
+            .map_err(LoaderErr::into_tim_error_owned)?;
+        self.cache.insert(jwks_uri.to_string(), fresh.clone()).await;
+        Ok(Some(fresh))
     }
 
     /// Fetch (or return cached) JWKS. Errors on any network / parse
@@ -77,6 +117,13 @@ enum LoaderErr {
 }
 
 impl LoaderErr {
+    fn into_tim_error_owned(self) -> TimError {
+        match self {
+            LoaderErr::Offline(msg) => TimError::UpstreamTimeout(msg),
+            LoaderErr::BadGateway(msg) => TimError::BadGateway(msg),
+        }
+    }
+
     fn into_tim_error(arc: Arc<Self>) -> TimError {
         match &*arc {
             LoaderErr::Offline(msg) => TimError::UpstreamTimeout(msg.clone()),
@@ -237,5 +284,42 @@ mod tests {
         }
         assert_eq!(ok, 100, "all callers must receive the same JWKS");
         m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn refresh_replaces_cached_set_and_is_rate_limited() {
+        let mut server = mockito::Server::new_async().await;
+        let old = r#"{"keys":[{"kty":"RSA","kid":"old","use":"sig","alg":"RS256","n":"AQAB","e":"AQAB"}]}"#;
+        let new = r#"{"keys":[{"kty":"RSA","kid":"new","use":"sig","alg":"RS256","n":"AQAB","e":"AQAB"}]}"#;
+        let m_old = server
+            .mock("GET", "/jwks")
+            .with_status(200)
+            .with_body(old)
+            .expect(1)
+            .create_async()
+            .await;
+        let cache = JwksCache::new(3600);
+        let url = format!("{}/jwks", server.url());
+        let first = cache.fetch(&url).await.unwrap();
+        assert_eq!(first.keys[0].common.key_id.as_deref(), Some("old"));
+        m_old.assert_async().await;
+
+        // IdP rotates its key.
+        let m_new = server
+            .mock("GET", "/jwks")
+            .with_status(200)
+            .with_body(new)
+            .expect(1)
+            .create_async()
+            .await;
+        let refreshed = cache.refresh(&url).await.unwrap().expect("refetched");
+        assert_eq!(refreshed.keys[0].common.key_id.as_deref(), Some("new"));
+        // Normal fetch now serves the refreshed set from cache.
+        let cached = cache.fetch(&url).await.unwrap();
+        assert_eq!(cached.keys[0].common.key_id.as_deref(), Some("new"));
+        // A second forced refresh inside the interval is refused
+        // without touching the network.
+        assert!(cache.refresh(&url).await.unwrap().is_none());
+        m_new.assert_async().await;
     }
 }
